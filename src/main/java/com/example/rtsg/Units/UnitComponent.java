@@ -5,6 +5,8 @@ import com.almasb.fxgl.entity.Entity;
 import com.almasb.fxgl.entity.component.Component;
 import com.example.rtsg.EntityComponent;
 import com.example.rtsg.EntityType;
+import com.example.rtsg.Owner;
+import com.example.rtsg.Structures.StructureComponent;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
@@ -19,30 +21,79 @@ public class UnitComponent extends EntityComponent {
 
     private final IntegerProperty hp;
     private final StringProperty name;
+    private final IntegerProperty armor;
 
     private Point2D moveTarget;
+    private Entity attackTarget;
+    private double attackTimer = 0.0;
 
-    public UnitComponent(UnitStats stats) {
+    public UnitComponent(UnitStats stats, Owner owner) {
+        super(owner);
         this.stats = stats;
         this.hp = new SimpleIntegerProperty(stats.maxHp());
         this.name = new SimpleStringProperty(stats.name());
+        this.armor = new SimpleIntegerProperty(stats.armor());
     }
 
     @Override
     public void onUpdate(double timePerFrame){
 
+        //collision and separation
         Point2D separation = calculateSeparation();
         Point2D moveDir = Point2D.ZERO;
+
+        //attack logic
+        //update cooldown per tick
+        if (attackTimer > 0) attackTimer -= timePerFrame;
+
+        if (attackTarget != null){
+
+            EntityComponent targetStats = getEntityComponent(attackTarget);
+            //first check if target is still there
+            if (!attackTarget.isActive() || targetStats.hpProperty().get() <= 0 || targetStats == null) {
+                attackTarget = null;
+                moveTarget = null;
+                return;
+            }
+            //get distance to target
+            double distToTarget = entity.getCenter().distance(attackTarget.getCenter());
+            //calculate physical distance accounting for entity model size
+            double combinedRadius = (entity.getWidth() / 2.0) + (attackTarget.getWidth() / 2.0);
+            //calculate actual attack range, taking in consideration of unit size
+            double effectiveRange = stats.attackRange() + combinedRadius;
+
+            //if in range, stop and attack
+            if (distToTarget < effectiveRange) {
+                moveTarget = null;
+                if (attackTimer <= 0) {
+                    performAttack();
+                    attackTimer = stats.attackSpeed();
+                }
+            }
+            //if out of range, move to chase target
+            else {
+                // Calculate the position that puts our CENTER on their CENTER
+                // (TargetPos + TargetHalfSize) - MyHalfSize
+                double targetX = attackTarget.getX() + attackTarget.getWidth() / 2.0 - entity.getWidth() / 2.0;
+                double targetY = attackTarget.getY() + attackTarget.getHeight() / 2.0 - entity.getHeight() / 2.0;
+
+                moveTarget = new Point2D(targetX, targetY);
+            }
+
+        }
+
+        //move logic
 
         if (moveTarget != null) {
             Point2D moveVector = this.moveTarget.subtract(entity.getPosition());
             double distance = moveVector.magnitude();
 
-            if (distance < 5) {
+            if (attackTarget == null && distance < 5) {
                 moveTarget = null;
             } else {
                 double currentSpeed = stats.moveSpeed();
-                if (distance < 50) {
+
+                if (attackTarget == null && distance < 50) {
                     currentSpeed *= (distance / 50);
                 }
                 moveDir = moveVector.normalize().multiply(currentSpeed);
@@ -62,16 +113,22 @@ public class UnitComponent extends EntityComponent {
         }
 
         entity.translate(finalVelocity.multiply(timePerFrame));
+
     }
 
     public void moveTo(Point2D moveTarget){
         this.moveTarget = moveTarget;
+        this.attackTarget = null;
     }
 
     @Override
     public IntegerProperty hpProperty(){return this.hp;}
     @Override
     public StringProperty nameProperty(){return this.name;}
+
+    @Override
+    public IntegerProperty armorProperty() {return this.armor;}
+
     @Override
     public int getMaxHp() {return stats.maxHp();}
 
@@ -144,6 +201,39 @@ public class UnitComponent extends EntityComponent {
         }
 
         return separationVector;
+    }
+
+    //performs the attack
+    private void performAttack() {
+        System.out.println(stats.name() + "attacked" + attackTarget.getType());
+
+        EntityComponent targetStats = getEntityComponent(attackTarget);
+
+        if  (targetStats != null) {
+            int currentHp = targetStats.hpProperty().get();
+            int damage = (int) stats.attackDamage();
+            int armor = targetStats.armorProperty() != null ? targetStats.armorProperty().get() : 0;
+            targetStats.hpProperty().set(Math.max(0, currentHp - (damage - armor)));
+        }
+
+    }
+
+    //assigns target for attack
+    public void attack(Entity target){
+        this.attackTarget = target;
+        this.moveTarget = null;
+    }
+
+    //helper to
+    private EntityComponent getEntityComponent(Entity entity) {
+
+        if (entity.hasComponent(UnitComponent.class)) {
+            return entity.getComponent(UnitComponent.class);
+        }
+        else if (entity.hasComponent(StructureComponent.class)) {
+            return entity.getComponent(StructureComponent.class);
+        }
+        return null;
     }
 
 }

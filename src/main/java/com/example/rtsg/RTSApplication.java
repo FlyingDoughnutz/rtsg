@@ -4,6 +4,7 @@ import com.almasb.fxgl.app.GameApplication;
 import com.almasb.fxgl.app.GameSettings;
 import com.almasb.fxgl.dsl.FXGL;
 import com.almasb.fxgl.entity.Entity;
+import com.almasb.fxgl.entity.SpawnData;
 import com.almasb.fxgl.input.Input;
 import com.almasb.fxgl.input.UserAction;
 import com.example.rtsg.Structures.StructureComponent;
@@ -61,10 +62,11 @@ public class RTSApplication extends GameApplication {
         getGameWorld().addEntityFactory(new StarCraftFactory());
 
         //spawn sample first unit
-        spawn("marine", 100, 100);
-        spawn("scv", 100, 200);
+        spawn("marine", new SpawnData(100, 100).put("owner", Owner.PLAYER));
+        spawn("scv", new SpawnData(100, 200).put("owner", Owner.PLAYER));
         spawn("zergling", 300, 300);
-        spawn("command_centre", 500, 200);
+        //spawn("command_centre", new SpawnData(500, 200).put("owner", Owner.PLAYER));
+        spawn("command_centre", new SpawnData(500, 200).put("owner", Owner.PLAYER));
     }
 
     @Override
@@ -230,12 +232,73 @@ public class RTSApplication extends GameApplication {
         input.addAction(selectionAction, MouseButton.PRIMARY);
 
         onBtnDown(MouseButton.SECONDARY, () -> {
+            //get mouse position
+            Point2D mousePos = input.getMousePositionWorld();
+            //scan a rectangle area around the click position for overlapping entities
+            var targetList = getGameWorld().getEntitiesInRange(new Rectangle2D(mousePos.getX() - 10, mousePos.getY() - 10, 20, 20));
+
+            Entity targetEntity = targetList.stream()
+                    .filter(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE))
+                    .filter(e -> !selectedUnits.contains(e))
+                    .findFirst()
+                    .orElse(null);
+
+            if (targetEntity != null) {
+                System.out.println("Right-Click Hit: " + targetEntity.getType());
+            } else {
+                System.out.println("Right-Click Hit: Ground at " + mousePos);
+            }
+
             for(Entity unit : selectedUnits) {
                 unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
-                    component.moveTo(getInput().getMousePositionWorld());
+                    if (component.getOwner() == Owner.PLAYER) {
+                        //clicked on unit
+                        if(targetEntity != null) {
+                            EntityComponent targetComp = getEntityComponent(targetEntity);
+                            //if target has logic
+                            if (targetComp != null) {
+                                //get the owner
+                                Owner targetOwner = targetComp.getOwner();
+                                System.out.println("Target Owner: " + targetOwner);
+                                if (targetOwner == Owner.ENEMY) {
+                                    System.out.println("Command: ATTACK");
+                                    component.attack(targetEntity);
+                                }
+                                else {
+                                    System.out.println("Command: FOLLOW/MOVE TO UNIT");
+                                    Point2D targetCenter = targetEntity.getCenter().subtract(unit.getWidth()/2, unit.getHeight()/2);
+                                    component.moveTo(targetCenter);
+                                }
+                            }
+                            //fallback when clicking entity without a component
+                            else {
+                                System.out.println("Command: MOVE (Target has no component)");
+                                component.moveTo(mousePos);
+                            }
+
+                        }
+                        //clicked on empty ground
+                        else{
+                            System.out.println("Command: MOVE TO GROUND");
+                            component.moveTo(getInput().getMousePositionWorld());
+                        }
+
+                    }
+                    else System.out.println("Cannot move hostile units!");
                 });
             }
         });
+    }
+
+    private EntityComponent getEntityComponent(Entity entity) {
+
+        if (entity.hasComponent(UnitComponent.class)) {
+            return entity.getComponent(UnitComponent.class);
+        }
+        else if (entity.hasComponent(StructureComponent.class)) {
+            return entity.getComponent(StructureComponent.class);
+        }
+        return null;
     }
 
 }

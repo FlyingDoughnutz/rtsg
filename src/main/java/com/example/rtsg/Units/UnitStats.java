@@ -7,5 +7,5 @@ public record UnitStats(
         double attackRange,
         double attackDamage,
         double attackSpeed,
-        double armor
+        int armor
 ) {}
