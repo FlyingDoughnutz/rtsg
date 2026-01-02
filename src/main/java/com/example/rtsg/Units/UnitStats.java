@@ -4,5 +4,8 @@ public record UnitStats(
         String name,
         int maxHp,
         double moveSpeed,
-        double attackRange
+        double attackRange,
+        double attackDamage,
+        double attackSpeed,
+        double armor
 ) {}

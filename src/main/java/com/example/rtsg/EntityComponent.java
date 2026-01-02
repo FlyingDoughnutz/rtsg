@@ -11,4 +11,5 @@ public abstract class EntityComponent extends Component {
 
     public abstract StringProperty nameProperty();
 
+    public abstract int getMaxHp();
 }

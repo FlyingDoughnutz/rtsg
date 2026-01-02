@@ -25,5 +25,7 @@ public class StructureComponent extends EntityComponent {
     public IntegerProperty hpProperty(){return this.hp;}
     @Override
     public StringProperty nameProperty(){return this.name;}
+    @Override
+    public int getMaxHp() {return stats.maxHp();}
 
 }

@@ -72,31 +72,75 @@ public class UnitComponent extends EntityComponent {
     public IntegerProperty hpProperty(){return this.hp;}
     @Override
     public StringProperty nameProperty(){return this.name;}
+    @Override
+    public int getMaxHp() {return stats.maxHp();}
 
     //helper method to calculate the amount to bump each unit by when colliding
     private Point2D calculateSeparation(){
         Point2D separationVector = Point2D.ZERO;
-        double spaceToKeep = 35.0;
+
+        double unitRadius = entity.getWidth() / 2.0;
+        double searchDist = unitRadius * 4.0 + 50.0;
 
         Rectangle2D detectionArea = new Rectangle2D(
-                entity.getX() - spaceToKeep,
-                entity.getY() - spaceToKeep,
-                spaceToKeep * 2,
-                spaceToKeep * 2
+                entity.getX() - searchDist,
+                entity.getY() - searchDist,
+                searchDist * 2,
+                searchDist * 2
         );
 
-        var otherUnits = FXGL.getGameWorld().getEntitiesInRange(detectionArea);
+        var nearbyUnits = FXGL.getGameWorld().getEntitiesInRange(detectionArea);
 
-        for (Entity other: otherUnits){
+        for (Entity other: nearbyUnits){
             if (other == entity) continue;
 
-            double dist = entity.distance(other);
+            //Rectangle Structure collision
+            if (other.isType(EntityType.STRUCTURE)||other.isType(EntityType.RESOURCE)){
+                //get the exact bounds of the structure/resource
+                double bMinX = other.getX();
+                double bMinY = other.getY();
+                double bMaxX = bMinX + other.getWidth();
+                double bMaxY = bMinY + other.getHeight();
+                //find the closest point on the building to the center of this entity
+                Point2D myCenter = entity.getCenter();
+                double closestX = Math.max(bMinX, Math.min(myCenter.getX(), bMaxX));
+                double closestY = Math.max(bMinY, Math.min(myCenter.getY(), bMaxY));
+                Point2D closestPoint = new Point2D(closestX, closestY);
+                //calculate distance to this closest point from center of this entity
+                double distToWall = myCenter.distance(closestPoint);
+                //Unit centre should be at least its own radius away from the wall
+                double overlap = unitRadius + 2.0 - distToWall;
+                //if in the building, push really hard outwards.
+                if (overlap > 0){
+                    Point2D pushDir = myCenter.subtract(closestPoint).normalize();
+                    if (pushDir.magnitude() == 0) pushDir = new Point2D(1,0);
 
-            if (dist < spaceToKeep && dist > 0){
-                Point2D pushAway= entity.getPosition().subtract(other.getPosition());
-                double strength = (spaceToKeep - dist) / spaceToKeep;
-                separationVector = separationVector.add(pushAway.normalize().multiply(stats.moveSpeed() * strength));
+                    double maxPush = 5.0;
+                    double pushForceScale = Math.min(overlap / 10.0, 1.0);
+                    separationVector = separationVector.add(pushDir.multiply(stats.moveSpeed() * maxPush * pushForceScale));
+                }
+
             }
+
+            //Circular Unit collision
+            else if (other.isType(EntityType.UNIT)){
+                //gets the size of the other unit to collide with
+                double otherRadius = other.getWidth() / 2.0;
+                //space between the 2 units should be their conbined radius
+                double requiredSpace = unitRadius + otherRadius;
+                //distance from this center to the other's center
+                double dist = entity.getCenter().distance(other.getCenter());
+                //if they're not overlapping but too close together
+                if (dist < requiredSpace && dist > 0){
+                    //calculate the vector to push away by
+                    Point2D pushAway = entity.getCenter().subtract(other.getCenter());
+                    //strength is stronger the deeper the overlap is
+                    double strength = (requiredSpace - dist) / requiredSpace;
+                    //the vector to separate by is normalized for direction, then multipled by given strength and unit speed then added
+                    separationVector = separationVector.add(pushAway.normalize().multiply(stats.moveSpeed() * strength));
+                }
+            }
+
         }
 
         return separationVector;

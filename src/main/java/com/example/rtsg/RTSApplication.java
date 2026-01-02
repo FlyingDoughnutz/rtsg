@@ -191,14 +191,22 @@ public class RTSApplication extends GameApplication {
 
                 List<Entity> foundUnits = getGameWorld().getEntitiesInRange(selectionRect).stream().filter(e -> e.isType(EntityType.UNIT)||e.isType(EntityType.STRUCTURE)||e.isType(EntityType.RESOURCE)).toList();
 
-                selectedUnits = new ArrayList<>(foundUnits);
-
-                selectionBox.setVisible(false);
+                for (Entity e : selectedUnits){
+                    e.getComponentOptional(HealthBarComponent.class).ifPresent(bar -> bar.setIsSelected(false));
+                }
 
                 nameLabel.textProperty().unbind();
                 hpLabel.textProperty().unbind();
                 nameLabel.setText("");
                 hpLabel.setText("");
+
+                selectedUnits = new ArrayList<>(foundUnits);
+
+                selectionBox.setVisible(false);
+
+                for (Entity e : selectedUnits){
+                    e.getComponentOptional(HealthBarComponent.class).ifPresent(bar -> bar.setIsSelected(true));
+                }
 
                 if (!selectedUnits.isEmpty()) {
 
