@@ -3,6 +3,6 @@ package com.example.rtsg;
 public enum EntityType
 {
     UNIT,
-    BUILDING,
+    STRUCTURE,
     RESOURCE
 }

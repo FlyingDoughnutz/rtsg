@@ -6,6 +6,7 @@ import com.almasb.fxgl.dsl.FXGL;
 import com.almasb.fxgl.entity.Entity;
 import com.almasb.fxgl.input.Input;
 import com.almasb.fxgl.input.UserAction;
+import com.example.rtsg.Structures.StructureComponent;
 import com.example.rtsg.Units.UnitComponent;
 import javafx.application.Application;
 import javafx.fxml.FXMLLoader;
@@ -31,6 +32,8 @@ public class RTSApplication extends GameApplication {
     private List<Entity> selectedUnits = new ArrayList<>();
     private Rectangle selectionBox = new Rectangle(0, 0, Color.rgb(0, 255, 0, 0.3));
     private Point2D selectionStartPoint;
+
+    private boolean isMoveMode = false;
 
     private HBox bottomUIBar;
     private GridPane controlPanel;
@@ -58,8 +61,10 @@ public class RTSApplication extends GameApplication {
         getGameWorld().addEntityFactory(new StarCraftFactory());
 
         //spawn sample first unit
-        selectedUnits.add(spawn("marine", 100, 100));
-        selectedUnits.add(spawn("scv", 100, 200));
+        spawn("marine", 100, 100);
+        spawn("scv", 100, 200);
+        spawn("zergling", 300, 300);
+        spawn("command_centre", 500, 200);
     }
 
     @Override
@@ -95,10 +100,23 @@ public class RTSApplication extends GameApplication {
 
         moveButton = new Button("Move");
         moveButton.setPrefSize(90,90);
+        moveButton.setOnAction(event -> {
+            if (!selectedUnits.isEmpty()) {
+                isMoveMode = true;
+            }
+        });
         controlPanel.add(moveButton,0,0);
 
         stopButton = new Button("Stop");
         stopButton.setPrefSize(90,90);
+        stopButton.setOnMouseClicked(e -> {
+            for (Entity unit : selectedUnits){
+                if (unit.hasComponent(UnitComponent.class)){
+                    //issues an overriding command to move the curr pos, effectively stopping it.
+                    unit.getComponent(UnitComponent.class).moveTo(unit.getPosition());
+                }
+            }
+        });
         controlPanel.add(stopButton,1,0);
 
         atkButton = new Button("Atk");
@@ -137,12 +155,21 @@ public class RTSApplication extends GameApplication {
             //start drag
             @Override
             protected void onActionBegin() {
-                selectionStartPoint = input.getMousePositionWorld();
-                selectionBox.setVisible(true);
-                selectionBox.setX(selectionStartPoint.getX());
-                selectionBox.setY(selectionStartPoint.getY());
-                selectionBox.setWidth(0);
-                selectionBox.setHeight(0);
+                if (isMoveMode) {
+                    Point2D target = input.getMousePositionWorld();
+                    for (Entity unit : selectedUnits){
+                        unit.getComponent(UnitComponent.class).moveTo(target);
+                    }
+                    isMoveMode = false;
+                }
+                else{
+                    selectionStartPoint = input.getMousePositionWorld();
+                    selectionBox.setVisible(true);
+                    selectionBox.setX(selectionStartPoint.getX());
+                    selectionBox.setY(selectionStartPoint.getY());
+                    selectionBox.setWidth(0);
+                    selectionBox.setHeight(0);
+                }
             }
 
             //updates box's dimensions while dragging
@@ -162,30 +189,32 @@ public class RTSApplication extends GameApplication {
             protected void onActionEnd() {
                 var selectionRect = new Rectangle2D(selectionBox.getX(), selectionBox.getY(), selectionBox.getWidth(), selectionBox.getHeight());
 
-                List<Entity> foundUnits = getGameWorld().getEntitiesInRange(selectionRect).stream().filter(e -> e.isType(EntityType.UNIT)).toList();
+                List<Entity> foundUnits = getGameWorld().getEntitiesInRange(selectionRect).stream().filter(e -> e.isType(EntityType.UNIT)||e.isType(EntityType.STRUCTURE)||e.isType(EntityType.RESOURCE)).toList();
 
                 selectedUnits = new ArrayList<>(foundUnits);
 
                 selectionBox.setVisible(false);
 
+                nameLabel.textProperty().unbind();
+                hpLabel.textProperty().unbind();
+                nameLabel.setText("");
+                hpLabel.setText("");
+
                 if (!selectedUnits.isEmpty()) {
 
                     Entity firstUnit = selectedUnits.get(0);
+                    EntityComponent targetComponent = null;
 
-                    UnitComponent unit = firstUnit.getComponent(UnitComponent.class);
-
-                    nameLabel.textProperty().unbind();
-                    hpLabel.textProperty().unbind();
-
-                    nameLabel.textProperty().bind(unit.nameProperty());
-                    hpLabel.textProperty().bind(unit.hpProperty().asString("HP: %d"));
-                }
-                else {
-                    nameLabel.textProperty().unbind();
-                    hpLabel.textProperty().unbind();
-
-                    nameLabel.setText("");
-                    hpLabel.setText("");
+                    if (firstUnit.hasComponent(UnitComponent.class)) {
+                        targetComponent = firstUnit.getComponent(UnitComponent.class);
+                    }
+                    else if(firstUnit.hasComponent(StructureComponent.class)) {
+                        targetComponent = firstUnit.getComponent(StructureComponent.class);
+                    }
+                    if (targetComponent != null) {
+                        nameLabel.textProperty().bind(targetComponent.nameProperty());
+                        hpLabel.textProperty().bind(targetComponent.hpProperty().asString("HP: %d"));
+                    }
                 }
             }
         };
@@ -194,7 +223,11 @@ public class RTSApplication extends GameApplication {
 
         onBtnDown(MouseButton.SECONDARY, () -> {
             for(Entity unit : selectedUnits) {
-                unit.getComponent(UnitComponent.class).moveTo(getInput().getMousePositionWorld());}
+                unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
+                    component.moveTo(getInput().getMousePositionWorld());
+                });
+            }
         });
     }
+
 }
