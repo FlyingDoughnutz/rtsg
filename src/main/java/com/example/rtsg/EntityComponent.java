@@ -8,9 +8,9 @@ import javafx.beans.property.StringProperty;
 
 public abstract class EntityComponent extends Component {
 
-    private Owner owner;
+    private Player owner;
 
-    public EntityComponent(Owner owner) {
+    public EntityComponent(Player owner) {
         this.owner = owner;
     }
 
@@ -26,7 +26,7 @@ public abstract class EntityComponent extends Component {
         System.out.println(nameProperty().get() + " has been destroyed");
     }
 
-    public Owner getOwner() {
+    public Player getOwner() {
         return owner;
     }
 

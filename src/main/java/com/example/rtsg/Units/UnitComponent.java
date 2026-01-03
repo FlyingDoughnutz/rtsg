@@ -6,6 +6,7 @@ import com.almasb.fxgl.entity.component.Component;
 import com.example.rtsg.EntityComponent;
 import com.example.rtsg.EntityType;
 import com.example.rtsg.Owner;
+import com.example.rtsg.Player;
 import com.example.rtsg.Structures.StructureComponent;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -27,7 +28,10 @@ public class UnitComponent extends EntityComponent {
     private Entity attackTarget;
     private double attackTimer = 0.0;
 
-    public UnitComponent(UnitStats stats, Owner owner) {
+    private double settleTimer = 0.0;
+    private Point2D lastPosition = Point2D.ZERO;
+
+    public UnitComponent(UnitStats stats, Player owner) {
         super(owner);
         this.stats = stats;
         this.hp = new SimpleIntegerProperty(stats.maxHp());
@@ -82,10 +86,30 @@ public class UnitComponent extends EntityComponent {
 
         }
 
+        //"settle down" logic when there is a crowd near the destination or path is blocked
+        if (moveTarget != null && attackTarget == null){
+            double distanceMovedSinceLastFrame = entity.getCenter().distance(lastPosition);
+            //if stuck, stop
+            if (distanceMovedSinceLastFrame < 0.25) {
+                settleTimer += timePerFrame;
+                if (settleTimer > 2.0) {
+                    moveTarget = null;
+                    settleTimer = 0.0;
+                }
+            }
+            //not stuck, continue
+            else {
+                settleTimer = 0;
+            }
+
+        }
+        //update last position for next frame
+        lastPosition = entity.getCenter();
+
         //move logic
 
         if (moveTarget != null) {
-            Point2D moveVector = this.moveTarget.subtract(entity.getPosition());
+            Point2D moveVector = this.moveTarget.subtract(entity.getCenter());
             double distance = moveVector.magnitude();
 
             if (attackTarget == null && distance < 5) {

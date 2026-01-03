@@ -3,6 +3,7 @@ package com.example.rtsg.Structures;
 import com.almasb.fxgl.entity.component.Component;
 import com.example.rtsg.EntityComponent;
 import com.example.rtsg.Owner;
+import com.example.rtsg.Player;
 import com.example.rtsg.Units.UnitStats;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -17,7 +18,7 @@ public class StructureComponent extends EntityComponent {
     private final StringProperty name;
     private final IntegerProperty armor;
 
-    public StructureComponent(StructureStats stats, Owner owner) {
+    public StructureComponent(StructureStats stats, Player owner) {
         super(owner);
         this.stats = stats;
         this.hp = new SimpleIntegerProperty(stats.maxHp());

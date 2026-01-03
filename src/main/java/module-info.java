@@ -5,6 +5,7 @@ module com.example.rtsg {
     requires com.almasb.fxgl.all;
     requires java.desktop;
     requires javafx.base;
+    requires javafx.graphics;
 
     opens com.example.rtsg to javafx.fxml, com.almasb.fxgl.core;
     exports com.example.rtsg;
