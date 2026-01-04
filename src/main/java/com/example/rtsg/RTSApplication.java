@@ -16,6 +16,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
+import javafx.scene.Cursor;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
@@ -61,6 +62,8 @@ public class RTSApplication extends GameApplication {
 
     private TextField commandInput;
 
+    private Cursor currCursor = javafx.scene.Cursor.DEFAULT;
+
     private final int MAP_BORDER_THRESHOLD = 10;
     private final double CAMERA_SPEED_MOUSEOVER = 500.0;
     private final double CAMERA_SPEED_MANUAL = 15.0;
@@ -93,10 +96,10 @@ public class RTSApplication extends GameApplication {
         getGameWorld().addEntityFactory(new StarCraftFactory());
 
         PlayerManager.getInstance();
-        PlayerManager.setHumanPlayer(new Player("Commander", Color.GREEN));
+        PlayerManager.setHumanPlayer(new Player("commander", Color.GREEN));
         PlayerManager.addToPlayerList(PlayerManager.getHumanPlayer());
 
-        botPlayer1 = new Player("Zerus_Swarm", Color.DEEPPINK);
+        botPlayer1 = new Player("swarm", Color.DEEPPINK);
         PlayerManager.getHumanPlayer().changeRelation(botPlayer1, Relation.HOSTILE);
         botPlayer1.changeRelation(PlayerManager.getHumanPlayer(), Relation.HOSTILE);
         PlayerManager.addToPlayerList(botPlayer1);
@@ -104,8 +107,8 @@ public class RTSApplication extends GameApplication {
         //spawn sample first unit
         spawn("marine", new SpawnData(100, 100).put("owner", PlayerManager.getHumanPlayer()));
         spawn("scv", new SpawnData(100, 200).put("owner", PlayerManager.getHumanPlayer()));
-        spawn("scv", new SpawnData(100, 210).put("owner", PlayerManager.getHumanPlayer()));
         spawn("scv", new SpawnData(100, 220).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("scv", new SpawnData(100, 240).put("owner", PlayerManager.getHumanPlayer()));
 
         spawn("zergling", new SpawnData(800, 300).put("owner", botPlayer1));
         //spawn("command_centre", new SpawnData(500, 200).put("owner", Owner.PLAYER));
@@ -276,7 +279,7 @@ public class RTSApplication extends GameApplication {
                         selectionBox.getWidth(),
                         selectionBox.getHeight()
                 );
-                performSelection(selectionRectangle);
+                performDragSelection(selectionRectangle);
                 selectionBox.setVisible(false);
             }
         };
@@ -290,8 +293,23 @@ public class RTSApplication extends GameApplication {
 
     @Override
     protected void onUpdate(double timePerFrame) {
-
+        Cursor newCursor = javafx.scene.Cursor.DEFAULT;
         //mouse hover over effect
+        Point2D mousePos = getInput().getMousePositionWorld();
+        Rectangle2D selectionRectangle = new Rectangle2D(mousePos.getX(), mousePos.getY(), 5, 5);
+        var targetList = getGameWorld().getEntitiesInRange(selectionRectangle);
+        boolean isHovering = targetList.stream()
+                .anyMatch(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE) || e.isType(EntityType.RESOURCE));
+        if(!isHovering) {
+            newCursor = Cursor.DEFAULT;
+        }
+        else {
+            newCursor = Cursor.HAND;
+        }
+        if (newCursor != currCursor) {
+            getGameScene().setCursor(newCursor);
+            currCursor = newCursor;
+        }
 
 
         //detection if mouse is at edges of screen
@@ -342,7 +360,7 @@ public class RTSApplication extends GameApplication {
     private void handleMoveCommand(Point2D mousePos) {
         for(Entity unit : selectedUnits) {
             unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
-                if (component.getOwner().getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
+                if (PlayerManager.findPlayerFromID(component.getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
                     component.moveTo(mousePos);
                 }
                 else System.out.println("Cannot move hostile units!");
@@ -355,17 +373,18 @@ public class RTSApplication extends GameApplication {
         Entity target = findTargetAt(mousePos);
         for (Entity unit : selectedUnits) {
             unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
-                if (component.getOwner().getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
+                if (PlayerManager.findPlayerFromID(component.getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
                     if (target != null) {
                         component.attack(target);
                     }
                     else {
-                        component.moveTo(mousePos);
+                        component.moveAttack(mousePos);
                     }
                 }
             });
         }
         this.isAtkMode = false;
+        getGameScene().setCursor(Cursor.DEFAULT); // Reset cursor
     }
 
     private void handleRightClick(Point2D mousePos) {
@@ -378,12 +397,12 @@ public class RTSApplication extends GameApplication {
         }
         for  (Entity unit : selectedUnits) {
             unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
-                if (component.getOwner().getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
+                if (PlayerManager.findPlayerFromID(component.getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
                     //clicked on unit
                     if(targetEntity != null) {
                         EntityComponent targetComp = getEntityComponent(targetEntity);
                         //if target has logic
-                        Player targetOwner = targetComp.getOwner();
+                        Player targetOwner = PlayerManager.findPlayerFromID(targetComp.getOwner().getPlayerID());
                         if (targetComp != null && PlayerManager.getHumanPlayer().getStance(targetOwner) == Relation.HOSTILE) {
                             System.out.println("Command: ATTACK");
                             component.attack(targetEntity);
@@ -405,7 +424,8 @@ public class RTSApplication extends GameApplication {
 
     }
 
-    private void performSelection(Rectangle2D selectionRect) {
+
+    private void performDragSelection(Rectangle2D selectionRect) {
 
         for (Entity e : selectedUnits){
             e.getComponentOptional(HealthBarComponent.class).ifPresent(bar -> bar.setIsSelected(false));
@@ -443,7 +463,7 @@ public class RTSApplication extends GameApplication {
         //clear existing buttons
         controlPanel.getChildren().clear();
         //check if unit belongs to player
-        if(getEntityComponent(selectedEntity).getOwner().getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
+        if(PlayerManager.findPlayerFromID(getEntityComponent(selectedEntity).getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
             //if selected entity is unit
             if (selectedEntity.hasComponent(UnitComponent.class)) {
                 moveButton = new Button("Move");
@@ -470,6 +490,8 @@ public class RTSApplication extends GameApplication {
                 atkButton.setOnAction(event -> {
                     if (!selectedUnits.isEmpty()) {
                         isAtkMode = true;
+                        isMoveMode = false;
+                        isPatrolMode = false;
                     }
                 });
                 controlPanel.add(atkButton, 2, 0);
@@ -504,7 +526,7 @@ public class RTSApplication extends GameApplication {
                 controlPanel.add(btnTrain, 0, 0);
             }
         }
-        else if (getEntityComponent(selectedEntity).getOwner().getStance(PlayerManager.getHumanPlayer()) == Relation.HOSTILE) {
+        else if (PlayerManager.findPlayerFromID(getEntityComponent(selectedEntity).getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.HOSTILE) {
             controlOwnerLabel = new Label("HOSTILE UNIT");
             controlOwnerLabel.setStyle("-fx-text-fill: red; -fx-font-size: 22px");
             controlDescriptionLabel = new Label("Cannot be commanded");

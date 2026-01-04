@@ -22,7 +22,7 @@ public class StarCraftFactory implements EntityFactory {
     @Spawns("marine")
     public Entity newMarine(SpawnData data) {
 
-        UnitStats marineStats = new UnitStats("Marine", 70, 150, 100, 7, 0.5, 1);
+        UnitStats marineStats = new UnitStats("Marine", 70, 150, 150, 7, 0.5, 1);
 
         Player owner = data.get("owner");
 
@@ -39,7 +39,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("scv")
     public Entity newSCV(SpawnData data) {
-        UnitStats scvStats = new UnitStats("SCV", 60, 150, 5, 5, 1, 0);
+        UnitStats scvStats = new UnitStats("SCV", 60, 150, 15, 5, 1, 0);
         Player owner = data.get("owner");
         UnitComponent scvComponent = new UnitComponent(scvStats, owner);
         return entityBuilder(data)
@@ -53,7 +53,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("zergling")
     public Entity newZergling(SpawnData data) {
-        UnitStats zerglingStats = new UnitStats("Zergling", 45, 250, 5, 6, 0.8, 0);
+        UnitStats zerglingStats = new UnitStats("Zergling", 45, 250, 15, 6, 0.8, 0);
         Player owner = data.get("owner");
         UnitComponent zerglingComponent = new UnitComponent(zerglingStats, owner);
         return entityBuilder(data)

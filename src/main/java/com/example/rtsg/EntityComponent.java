@@ -30,8 +30,6 @@ public abstract class EntityComponent extends Component {
         return owner;
     }
 
-    public void setOwner(Owner owner) {}
-
     public abstract IntegerProperty hpProperty();
 
     public abstract StringProperty nameProperty();

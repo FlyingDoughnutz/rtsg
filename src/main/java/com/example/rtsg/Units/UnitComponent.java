@@ -2,11 +2,7 @@ package com.example.rtsg.Units;
 
 import com.almasb.fxgl.dsl.FXGL;
 import com.almasb.fxgl.entity.Entity;
-import com.almasb.fxgl.entity.component.Component;
-import com.example.rtsg.EntityComponent;
-import com.example.rtsg.EntityType;
-import com.example.rtsg.Owner;
-import com.example.rtsg.Player;
+import com.example.rtsg.*;
 import com.example.rtsg.Structures.StructureComponent;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -14,7 +10,8 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
-import javafx.scene.shape.Circle;
+
+import static com.almasb.fxgl.dsl.FXGL.getGameWorld;
 
 public class UnitComponent extends EntityComponent {
 
@@ -24,12 +21,22 @@ public class UnitComponent extends EntityComponent {
     private final StringProperty name;
     private final IntegerProperty armor;
 
+    private UnitState state = UnitState.IDLE;
+
+    private boolean flagPatrol = false;
+    private Point2D patrolPointA;
+    private Point2D patrolPointB;
+
     private Point2D moveTarget;
     private Entity attackTarget;
-    private double attackTimer = 0.0;
+    private Point2D attackMoveDestination;
 
+    private double attackTimer = 0.0;
+    private double scanTimer = 0.0;
     private double settleTimer = 0.0;
     private Point2D lastPosition = Point2D.ZERO;
+    private Point2D finalVelocity = new Point2D(0, 0);
+    private boolean flagIsStuck = false;
 
     public UnitComponent(UnitStats stats, Player owner) {
         super(owner);
@@ -42,14 +49,182 @@ public class UnitComponent extends EntityComponent {
     @Override
     public void onUpdate(double timePerFrame){
 
-        //collision and separation
-        Point2D separation = calculateSeparation();
-        Point2D moveDir = Point2D.ZERO;
-
-        //attack logic
         //update cooldown per tick
         if (attackTimer > 0) attackTimer -= timePerFrame;
+        if (scanTimer > 0) scanTimer -= timePerFrame;
+        if (flagIsStuck) settleTimer += timePerFrame;
 
+        finalVelocity = new Point2D(0, 0);
+
+        //State Machine Logic
+        switch (state) {
+            case IDLE:
+                if (scanTimer <= 0.0) {
+                    Entity potentialTarget = scanAround();
+                    if (potentialTarget != null){
+                        attack(potentialTarget);
+                    }
+                    scanTimer += 0.5;
+                }
+                break;
+
+            case MOVING:
+                updateMoveLogic();
+                if (moveTarget != null) calculateMovementPhysics();
+                else state = UnitState.IDLE;
+                break;
+
+            case ATTACK:
+                if (attackTarget == null || !attackTarget.isActive()){
+                    state = UnitState.IDLE;
+                    //patrol logic.
+                    if (flagPatrol){}
+                    //resume a-move path
+                    else if (attackMoveDestination != null){
+                        moveTarget = attackMoveDestination;
+                        attackTarget = null;
+                        state = UnitState.ATTACK_MOVE;
+                        flagIsStuck = false;
+                        settleTimer = 0.0;
+                    }
+                    else {
+                        state = UnitState.IDLE;
+                    }
+                }
+                else {
+                    updateAttackLogic();
+                    if (moveTarget != null) {
+                        //still moving so check if stuck
+                        updateStuckDetection();
+                        //if stuck, give up the target
+                        if(flagIsStuck && settleTimer > 0.8) {
+                            moveTarget = null;
+                            attackTarget = null;
+                            //if we were a-moving
+                            if(attackMoveDestination != null){
+                                state = UnitState.ATTACK_MOVE;
+                                moveTarget = attackMoveDestination;
+                            }
+                            else {
+                                state = UnitState.IDLE;
+                            }
+                            flagIsStuck = false;
+                            settleTimer = 0.0;
+                        }
+                        //if not stuck, chase
+                        else {
+                            calculateMovementPhysics();
+                        }
+                    }
+                }
+                break;
+
+            case ATTACK_MOVE:
+                //scan for enemies
+                if (scanTimer <= 0.0) {
+                    Entity potentialTarget = scanAround();
+                    if (potentialTarget != null){
+                        attack(potentialTarget);
+                        return;
+                    }
+                    scanTimer = 0.2;
+                }
+                //move towards target point
+                updateMoveLogic();
+                if (moveTarget != null) calculateMovementPhysics();
+                else state = UnitState.IDLE;
+                attackMoveDestination = null;
+                break;
+
+            case HOLD:
+
+                break;
+
+            case PATROL:
+
+                break;
+
+            case GATHER:
+
+                break;
+
+            case RETURN_CARGO:
+
+                break;
+
+        }
+
+        entity.translate(finalVelocity.multiply(timePerFrame));
+
+    }
+
+    public void moveAttack(Point2D target) {
+        this.moveTarget = target;
+        this.attackTarget = null;
+        this.attackMoveDestination = target;
+        this.flagPatrol = false;
+        this.flagIsStuck = false;
+        this.settleTimer = 0.0;
+        setState(UnitState.ATTACK_MOVE);
+    }
+
+    //helper that scans around the current unit and finds a valid hostile target
+    public Entity scanAround() {
+        //find an appropriate scan radius for this unit
+        //if ranged, slightly larger, if melee, set to 250
+        double scanRadius = Math.max(stats.attackRange() * 1.5, 250);
+
+        var foundEntities = getGameWorld().getEntitiesInRange(
+                new Rectangle2D(entity.getCenter().getX() - scanRadius, entity.getCenter().getY() - scanRadius,
+                        scanRadius * 2, scanRadius * 2));
+        return foundEntities.stream()
+                .filter(e -> e != entity)//has to be an entity
+                .filter(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE))//has to be a unit or a structure
+                .filter(e -> isHostile(e))//filter for hostile
+                .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
+                .findFirst()//first found that fits all conditions
+                .orElse(null);//return null if no valid target
+    }
+
+    //check if we're stuck, if so, raise a flag
+    private void updateStuckDetection(){
+        double distanceMoved = entity.getCenter().distance(lastPosition);
+        //update last position for next frame
+        lastPosition = entity.getCenter();
+        if (moveTarget != null){
+            //if stuck, raise flag
+            if (distanceMoved < 0.25) {
+                flagIsStuck = true;
+            }
+            //not stuck, continue
+            else {
+                flagIsStuck = false;
+                settleTimer = 0.0;
+            }
+        }
+    }
+
+    //checks in-movement
+    private void updateMoveLogic() {
+        updateStuckDetection();
+        //we have arrived at the destination
+        if (moveTarget != null && entity.getCenter().distance(moveTarget) < 10) {
+            moveTarget = null;
+            state = UnitState.IDLE;
+            return;
+        }
+        //stop if we're stuck
+        if (flagIsStuck && settleTimer > 0.8) {
+            moveTarget = null;
+            state = UnitState.IDLE;
+            flagIsStuck = false;
+            settleTimer = 0.0;
+        }
+    }
+
+    //helper for attacking related logic
+    private void updateAttackLogic() {
+        //attack logic
         if (attackTarget != null){
 
             EntityComponent targetStats = getEntityComponent(attackTarget);
@@ -76,73 +251,66 @@ public class UnitComponent extends EntityComponent {
             }
             //if out of range, move to chase target
             else {
-                // Calculate the position that puts our CENTER on their CENTER
-                // (TargetPos + TargetHalfSize) - MyHalfSize
-                double targetX = attackTarget.getX() + attackTarget.getWidth() / 2.0 - entity.getWidth() / 2.0;
-                double targetY = attackTarget.getY() + attackTarget.getHeight() / 2.0 - entity.getHeight() / 2.0;
-
-                moveTarget = new Point2D(targetX, targetY);
+                moveTarget = attackTarget.getCenter();
+            }
+            //give up if stuck
+            if (flagIsStuck && settleTimer > 0.8) {
+                moveTarget = null;
+                state = UnitState.IDLE;
+                flagIsStuck = false;
+                settleTimer = 0.0;
             }
 
         }
+    }
 
-        //"settle down" logic when there is a crowd near the destination or path is blocked
-        if (moveTarget != null && attackTarget == null){
-            double distanceMovedSinceLastFrame = entity.getCenter().distance(lastPosition);
-            //if stuck, stop
-            if (distanceMovedSinceLastFrame < 0.25) {
-                settleTimer += timePerFrame;
-                if (settleTimer > 2.0) {
-                    moveTarget = null;
-                    settleTimer = 0.0;
-                }
-            }
-            //not stuck, continue
-            else {
-                settleTimer = 0;
-            }
-
-        }
-        //update last position for next frame
-        lastPosition = entity.getCenter();
-
+    //helper for regular movement
+    private void calculateMovementPhysics() {
+        Point2D separation = calculateSeparation();
+        Point2D moveDir = Point2D.ZERO;
         //move logic
-
         if (moveTarget != null) {
             Point2D moveVector = this.moveTarget.subtract(entity.getCenter());
             double distance = moveVector.magnitude();
 
-            if (attackTarget == null && distance < 5) {
-                moveTarget = null;
-            } else {
-                double currentSpeed = stats.moveSpeed();
-
-                if (attackTarget == null && distance < 50) {
-                    currentSpeed *= (distance / 50);
-                }
-                moveDir = moveVector.normalize().multiply(currentSpeed);
+            double currentSpeed = stats.moveSpeed();
+            //if we're close and not in pursuit, slow down
+            if (state == UnitState.MOVING && distance < 50) {
+                currentSpeed *= (distance / 50);
             }
+            moveDir = moveVector.normalize().multiply(currentSpeed);
         }
+        //add this separation to the existing velocity (regular movement)
+        finalVelocity = moveDir.add(separation);
+        //if it's faster than intended, clamp it to the unit's speed
+        if (finalVelocity.magnitude() > stats.moveSpeed()) finalVelocity = finalVelocity.normalize().multiply(stats.moveSpeed());
+    }
 
-        Point2D finalVelocity = moveDir.add(separation);
+    //check if hostile to this
+    private boolean isHostile(Entity e) {
 
-        if (finalVelocity.magnitude() < 1.0) {
-            return;
-        }
+        EntityComponent targetComponent = getEntityComponent(e);
+        //check for nulls
+        if (targetComponent == null || targetComponent.getOwner() == null) return false;
 
-        // This prevents the forces from stacking to create "super speed"
-        // and ensures separation has "room" to work within the speed limit.
-        if (finalVelocity.magnitude() > stats.moveSpeed()) {
-            finalVelocity = finalVelocity.normalize().multiply(stats.moveSpeed());
-        }
+        //find player using ID instead of getOwner
+        Player actualOwner = PlayerManager.findPlayerFromID(this.getOwner().getPlayerID());
 
-        entity.translate(finalVelocity.multiply(timePerFrame));
+        Player actualTarget = PlayerManager.findPlayerFromID(targetComponent.getOwner().getPlayerID());
 
+        if (actualOwner == null || actualTarget == null) return false;
+
+        return actualOwner.getStance(actualTarget) == Relation.HOSTILE;
     }
 
     public void moveTo(Point2D moveTarget){
         this.moveTarget = moveTarget;
         this.attackTarget = null;
+        this.attackMoveDestination =  null;
+        this.flagPatrol = false;
+        this.flagIsStuck = false;
+        this.settleTimer = 0.0;
+        setState(UnitState.MOVING);
     }
 
     @Override
@@ -246,6 +414,9 @@ public class UnitComponent extends EntityComponent {
     public void attack(Entity target){
         this.attackTarget = target;
         this.moveTarget = null;
+        this.flagIsStuck = false;
+        this.settleTimer = 0.0;
+        setState(UnitState.ATTACK);
     }
 
     //helper to
@@ -260,4 +431,12 @@ public class UnitComponent extends EntityComponent {
         return null;
     }
 
+    public UnitState getState() {
+        return state;
+    }
+
+    public void setState(UnitState state) {
+        System.out.println(name.get() + " changed state to: " + state);
+        this.state = state;
+    }
 }
