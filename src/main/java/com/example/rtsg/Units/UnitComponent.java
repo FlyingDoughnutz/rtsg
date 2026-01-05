@@ -60,6 +60,29 @@ public class UnitComponent extends EntityComponent {
     }
 
     @Override
+    public void onAdded() {
+        hpProperty().addListener((observable, oldValue, newValue) -> {
+            if (newValue.intValue() <= 0) onDeath();
+        });
+        //update supply when created
+        Player owner = getOwner();
+        if (owner != null) {
+            owner.setCurrentSupply(owner.getCurrentSupply() + stats.supplyCost());
+        }
+    }
+
+    @Override
+    public void onRemoved() {
+        //update supply when destroyed
+        Player owner = getOwner();
+        if (owner != null) {
+            //clamp to prevent going negative
+            int newSupply = Math.max(0, owner.getCurrentSupply() - stats.supplyCost());
+            owner.setCurrentSupply(newSupply);
+        }
+    }
+
+    @Override
     public void onUpdate(double timePerFrame){
 
         //update cooldown per tick
@@ -84,18 +107,6 @@ public class UnitComponent extends EntityComponent {
                         scanAttackTimer += 0.5;
                     }
                 }
-                //if worker, if not gathering, find another mineral patch in the vicinity
-                // else {
-                //    if (miningTarget == null) {
-                //        if (scanMiningTimer <= 0.0) {
-                //            Entity potentialMineTarget = scanAroundMine();
-                //            if (potentialMineTarget != null) {
-                //                mine(potentialMineTarget);
-                //            }
-                //        }
-                //        scanMiningTimer += 0.5;
-                //    }
-                //}
                 break;
 
             case MOVING:

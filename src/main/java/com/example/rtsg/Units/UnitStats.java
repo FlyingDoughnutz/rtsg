@@ -8,5 +8,6 @@ public record UnitStats(
         double attackDamage,
         double attackSpeed,
         int armor,
-        boolean isWorker
+        boolean isWorker,
+        int supplyCost
 ) {}

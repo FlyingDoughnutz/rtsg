@@ -8,6 +8,7 @@ import com.almasb.fxgl.entity.Entity;
 import com.almasb.fxgl.entity.SpawnData;
 import com.almasb.fxgl.input.Input;
 import com.almasb.fxgl.input.UserAction;
+import com.almasb.fxgl.texture.Texture;
 import com.example.rtsg.Resources.ResourceComponent;
 import com.example.rtsg.Structures.StructureComponent;
 import com.example.rtsg.Units.UnitComponent;
@@ -22,6 +23,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextField;
+import javafx.scene.image.Image;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.scene.layout.*;
@@ -126,6 +128,7 @@ public class RTSApplication extends GameApplication {
         spawn("scv", new SpawnData(100, 300).put("owner", PlayerManager.getHumanPlayer()));
         spawn("scv", new SpawnData(100, 330).put("owner", PlayerManager.getHumanPlayer()));
         spawn("command_centre", new SpawnData(300, 400).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("barracks", new SpawnData(600, 430).put("owner", PlayerManager.getHumanPlayer()));
 
         spawn("mineral_large", new SpawnData(100, 400).put("owner", resourcePlayer));
         spawn("mineral_large", new SpawnData(100, 450).put("owner", resourcePlayer));
@@ -684,18 +687,18 @@ public class RTSApplication extends GameApplication {
         topUIBar.setPrefSize(FXGL.getAppWidth(), 40);
         topUIBar.setPadding(new Insets(5, 20, 5, 20));
         topUIBar.setAlignment(Pos.CENTER_RIGHT);
-        topUIBar.setBackground(new Background(new BackgroundFill(Color.rgb(0,0,0,0.7), CornerRadii.EMPTY, Insets.EMPTY)));
+        //topUIBar.setBackground(new Background(new BackgroundFill(Color.rgb(0,0,0,0.7), CornerRadii.EMPTY, Insets.EMPTY)));
 
         //minerals
-        HBox mineralBox = createResourceGroup(Color.CYAN, "0");
+        HBox mineralBox = createResourceGroup(Color.CYAN, "0", "ui_icons/mineral_icon.png");
         mineralLabel = (Label) mineralBox.getChildren().get(1);
 
         //gas
-        HBox gasBox = createResourceGroup(Color.LIMEGREEN, "0");
+        HBox gasBox = createResourceGroup(Color.LIMEGREEN, "0", "ui_icons/gas_icon.png");
         gasLabel = (Label) gasBox.getChildren().get(1);
 
         //supply
-        HBox supplyBox = createResourceGroup(Color.WHITE, "0/200");
+        HBox supplyBox = createResourceGroup(Color.WHITE, "0/200", "ui_icons/supply_icon.png");
         supplyLabel = (Label) supplyBox.getChildren().get(1);
 
         //add all to topuibar
@@ -711,27 +714,42 @@ public class RTSApplication extends GameApplication {
         human.maxSupplyProperty().addListener((obs, o, n) -> {
             updateSupplyLabel(human);
         });
+        //manually update once at start of game
+        updateSupplyLabel(human);
+
         //add it
         addUINode(topUIBar);
     }
 
     //helper to create icon-resource hbox
-    private HBox createResourceGroup(Color color, String text) {
+    private HBox createResourceGroup(Color color, String text, String imageName) {
         HBox resourceGroup = new HBox(10);
         resourceGroup.setAlignment(Pos.CENTER_LEFT);
+        //tries to load in the corresponding resource icon texture
+        String texturePath = "/assets/textures/"+imageName;
 
-        Rectangle icon = new Rectangle(20, 20, color);
-        icon.setStroke(Color.GRAY);
+        var url = getClass().getResource(texturePath);
 
-        // New way
-        //var iconTexture = FXGL.texture("mineral_icon.png", 20, 20); // Resizes to 20x20
-        //resourceGroup.getChildren().addAll(iconTexture, label);
+        //if file found at url
+        if (url != null) {
+            String validUrl = url.toExternalForm();
+            Image fxImage = new Image(validUrl, 20, 20, true, true);
+            Texture iconTexture = new Texture(fxImage);
+            resourceGroup.getChildren().add(iconTexture);
+        }
+        //if can't find, use solid rectangle
+        else {
+            System.out.println("Image not found: " + texturePath + ", using placeholder");
+            Rectangle icon = new Rectangle(20, 20, color);
+            icon.setStroke(Color.GRAY);
+            resourceGroup.getChildren().add(icon);
+        }
 
         Label label = new Label(text);
         label.setTextFill(Color.WHITE);
         label.setStyle("-fx-font-size: 16px; -fx-font-weight: bold");
 
-        resourceGroup.getChildren().addAll(icon, label);
+        resourceGroup.getChildren().add(label);
         return resourceGroup;
     }
 

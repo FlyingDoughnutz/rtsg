@@ -5,5 +5,6 @@ import javafx.geometry.Point2D;
 public record StructureStats(
         String name,
         int maxHp,
-        int armor
+        int armor,
+        int supplyProvided
 ) {}

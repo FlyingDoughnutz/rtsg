@@ -26,7 +26,7 @@ public class StarCraftFactory implements EntityFactory {
     @Spawns("marine")
     public Entity newMarine(SpawnData data) {
 
-        UnitStats marineStats = new UnitStats("Marine", 70, 125, 150, 7, 0.5, 1, false);
+        UnitStats marineStats = new UnitStats("Marine", 70, 125, 150, 7, 0.5, 1, false, 1);
 
         Player owner = data.get("owner");
 
@@ -43,7 +43,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("scv")
     public Entity newSCV(SpawnData data) {
-        UnitStats scvStats = new UnitStats("SCV", 60, 125, 15, 5, 1, 0, true);
+        UnitStats scvStats = new UnitStats("SCV", 60, 125, 15, 5, 1, 0, true, 1);
         Player owner = data.get("owner");
         UnitComponent scvComponent = new UnitComponent(scvStats, owner);
         return entityBuilder(data)
@@ -57,7 +57,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("zergling")
     public Entity newZergling(SpawnData data) {
-        UnitStats zerglingStats = new UnitStats("Zergling", 45, 200, 15, 6, 0.8, 0, false);
+        UnitStats zerglingStats = new UnitStats("Zergling", 45, 200, 15, 6, 0.8, 0, false, 1);
         Player owner = data.get("owner");
         UnitComponent zerglingComponent = new UnitComponent(zerglingStats, owner);
         return entityBuilder(data)
@@ -71,7 +71,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("command_centre")
     public Entity newCommandCentre(SpawnData data) {
-        StructureStats ccStats = new StructureStats("Command Centre", 1600, 0);
+        StructureStats ccStats = new StructureStats("Command Centre", 1600, 0, 15);
         Player owner = data.get("owner");
         StructureComponent ccComponent = new StructureComponent(ccStats, owner);
         ccComponent.addCommand("Train SCV", () -> {
@@ -94,7 +94,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("barracks")
     public Entity newBarracks(SpawnData data) {
-        StructureStats barracksStats = new StructureStats("Barracks", 1000, 0);
+        StructureStats barracksStats = new StructureStats("Barracks", 1000, 0, 0);
         Player owner = data.get("owner");
         StructureComponent barracksComponent = new StructureComponent(barracksStats, owner);
         barracksComponent.addCommand("Marines", () -> {

@@ -17,7 +17,7 @@ public class Player {
     private IntegerProperty minerals = new SimpleIntegerProperty(0);
     private IntegerProperty gas = new SimpleIntegerProperty(0);
     private IntegerProperty currSupply = new SimpleIntegerProperty(0);
-    private IntegerProperty maxSupply = new SimpleIntegerProperty(18);
+    private IntegerProperty maxSupply = new SimpleIntegerProperty(0);
 
     public Player(String playerID, Color playerColor) {
         this.playerID = playerID;

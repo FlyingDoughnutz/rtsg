@@ -38,6 +38,19 @@ public class StructureComponent extends EntityComponent {
     }
 
     @Override
+    public void onAdded(){
+        hpProperty().addListener((observable, oldValue, newValue) -> {
+            if (newValue.intValue() <= 0) onDeath();
+        });
+        getOwner().setMaxSupply(getOwner().getMaxSupply() + stats.supplyProvided());
+    }
+
+    @Override
+    public void onRemoved(){
+        getOwner().setMaxSupply(Math.max(0, getOwner().getMaxSupply() - stats.supplyProvided()));
+    }
+
+    @Override
     public IntegerProperty hpProperty(){return this.hp;}
     @Override
     public StringProperty nameProperty(){return this.name;}
