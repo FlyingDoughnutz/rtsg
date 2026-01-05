@@ -3,11 +3,10 @@ package com.example.rtsg.Units;
 import com.almasb.fxgl.dsl.FXGL;
 import com.almasb.fxgl.entity.Entity;
 import com.example.rtsg.*;
+import com.example.rtsg.Resources.ResourceComponent;
+import com.example.rtsg.Structures.BaseComponent;
 import com.example.rtsg.Structures.StructureComponent;
-import javafx.beans.property.IntegerProperty;
-import javafx.beans.property.SimpleIntegerProperty;
-import javafx.beans.property.SimpleStringProperty;
-import javafx.beans.property.StringProperty;
+import javafx.beans.property.*;
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
 
@@ -20,23 +19,36 @@ public class UnitComponent extends EntityComponent {
     private final IntegerProperty hp;
     private final StringProperty name;
     private final IntegerProperty armor;
+    private final BooleanProperty isWorker;
 
     private UnitState state = UnitState.IDLE;
 
     private boolean flagPatrol = false;
+    private boolean flagHold = false;
     private Point2D patrolPointA;
     private Point2D patrolPointB;
+    private Point2D currentPatrolTarget;
 
     private Point2D moveTarget;
     private Entity attackTarget;
     private Point2D attackMoveDestination;
 
     private double attackTimer = 0.0;
-    private double scanTimer = 0.0;
+    private double scanAttackTimer = 0.0;
     private double settleTimer = 0.0;
     private Point2D lastPosition = Point2D.ZERO;
     private Point2D finalVelocity = new Point2D(0, 0);
     private boolean flagIsStuck = false;
+
+    private final int COLLECTION_RATE = 2;
+    private final int COLLECTION_CAPACITY = 8;
+    private double miningTimer = 0.0;
+    private final int MINERAL_SCAN_RANGE = 200;
+    private double scanMiningTimer = 0.0;
+    private double scanCCTimer = 0.0;
+    private Entity miningTarget;
+    private Entity returnTarget;
+    private int resourceCarried = 0;
 
     public UnitComponent(UnitStats stats, Player owner) {
         super(owner);
@@ -44,6 +56,7 @@ public class UnitComponent extends EntityComponent {
         this.hp = new SimpleIntegerProperty(stats.maxHp());
         this.name = new SimpleStringProperty(stats.name());
         this.armor = new SimpleIntegerProperty(stats.armor());
+        this.isWorker = new SimpleBooleanProperty(stats.isWorker());
     }
 
     @Override
@@ -51,7 +64,10 @@ public class UnitComponent extends EntityComponent {
 
         //update cooldown per tick
         if (attackTimer > 0) attackTimer -= timePerFrame;
-        if (scanTimer > 0) scanTimer -= timePerFrame;
+        if (scanAttackTimer > 0) scanAttackTimer -= timePerFrame;
+        if (this.stats.isWorker() && scanMiningTimer > 0) scanMiningTimer -= timePerFrame;
+        if (this.stats.isWorker() && scanCCTimer > 0) scanCCTimer -= timePerFrame;
+        if (this.stats.isWorker() && miningTimer > 0) miningTimer -= timePerFrame;
         if (flagIsStuck) settleTimer += timePerFrame;
 
         finalVelocity = new Point2D(0, 0);
@@ -59,13 +75,27 @@ public class UnitComponent extends EntityComponent {
         //State Machine Logic
         switch (state) {
             case IDLE:
-                if (scanTimer <= 0.0) {
-                    Entity potentialTarget = scanAround();
-                    if (potentialTarget != null){
-                        attack(potentialTarget);
+                if (!this.stats.isWorker()) {
+                    if (scanAttackTimer <= 0.0) {
+                        Entity potentialTarget = scanAroundAttack();
+                        if (potentialTarget != null) {
+                            attack(potentialTarget);
+                        }
+                        scanAttackTimer += 0.5;
                     }
-                    scanTimer += 0.5;
                 }
+                //if worker, if not gathering, find another mineral patch in the vicinity
+                // else {
+                //    if (miningTarget == null) {
+                //        if (scanMiningTimer <= 0.0) {
+                //            Entity potentialMineTarget = scanAroundMine();
+                //            if (potentialMineTarget != null) {
+                //                mine(potentialMineTarget);
+                //            }
+                //        }
+                //        scanMiningTimer += 0.5;
+                //    }
+                //}
                 break;
 
             case MOVING:
@@ -78,7 +108,17 @@ public class UnitComponent extends EntityComponent {
                 if (attackTarget == null || !attackTarget.isActive()){
                     state = UnitState.IDLE;
                     //patrol logic.
-                    if (flagPatrol){}
+                    if (flagPatrol){
+                        state = UnitState.PATROL;
+                        moveTarget = currentPatrolTarget;
+                        attackTarget = null;
+                    }
+                    //hold logic
+                    else if (flagHold){
+                        state = UnitState.HOLD;
+                        moveTarget = null;
+                        attackTarget = null;
+                    }
                     //resume a-move path
                     else if (attackMoveDestination != null){
                         moveTarget = attackMoveDestination;
@@ -93,7 +133,8 @@ public class UnitComponent extends EntityComponent {
                 }
                 else {
                     updateAttackLogic();
-                    if (moveTarget != null) {
+                    //move to chase only if not in hold mode
+                    if (!flagHold && moveTarget != null) {
                         //still moving so check if stuck
                         updateStuckDetection();
                         //if stuck, give up the target
@@ -104,6 +145,12 @@ public class UnitComponent extends EntityComponent {
                             if(attackMoveDestination != null){
                                 state = UnitState.ATTACK_MOVE;
                                 moveTarget = attackMoveDestination;
+                            }
+                            else if (flagPatrol){
+                                state = UnitState.PATROL;
+                            }
+                            else if(flagHold){
+                                state = UnitState.HOLD;
                             }
                             else {
                                 state = UnitState.IDLE;
@@ -116,18 +163,22 @@ public class UnitComponent extends EntityComponent {
                             calculateMovementPhysics();
                         }
                     }
+                    //force stop chase if in hold mode
+                    else if (flagHold && moveTarget != null) {
+                        moveTarget = null;
+                    }
                 }
                 break;
 
             case ATTACK_MOVE:
                 //scan for enemies
-                if (scanTimer <= 0.0) {
-                    Entity potentialTarget = scanAround();
+                if (scanAttackTimer <= 0.0) {
+                    Entity potentialTarget = scanAroundAttack();
                     if (potentialTarget != null){
                         attack(potentialTarget);
                         return;
                     }
-                    scanTimer = 0.2;
+                    scanAttackTimer = 0.2;
                 }
                 //move towards target point
                 updateMoveLogic();
@@ -138,18 +189,165 @@ public class UnitComponent extends EntityComponent {
 
             case HOLD:
 
+                moveTarget = null;
+                //scan around for enemies
+                if (scanAttackTimer <= 0.0) {
+                    Entity potentialTarget = scanAroundAttack();
+                    if (potentialTarget != null){
+                        //calculate distance between this and the found target
+                        double distToTarget = entity.getCenter().distance(potentialTarget.getCenter());
+                        double combinedDistance = (entity.getWidth() / 2.0) + (potentialTarget.getWidth() / 2.0);
+                        //check if this can actually reach the target w/o moving
+                        if (distToTarget <= stats.attackRange() + combinedDistance) {
+                            attack(potentialTarget);
+                            this.flagHold = true;
+                        }
+                    }
+                    scanAttackTimer = 0.5;
+                }
                 break;
 
             case PATROL:
+                //scan for enemies has highest priority
+                if (!this.stats.isWorker()) {
+                    if (scanAttackTimer <= 0.0) {
+                        Entity potentialTarget = scanAroundAttack();
+                        if (potentialTarget != null) {
+                            attack(potentialTarget);
+                            this.flagPatrol = true;
+                            return;
+                        }
+                        //a bit faster since patrols need to be en guarde
+                        scanAttackTimer = 0.2;
+                    }
+                }
 
+                //then handle movement
+                if (moveTarget == null) {
+                    //if we finished killing a unit, resume patrol
+                    moveTarget = currentPatrolTarget;
+                }
+                //calculate distance to next patrol point
+                double distToPoint = entity.getCenter().distance(moveTarget);
+                //if close enough, switch target to the other patrol point
+                if (distToPoint < 10) {
+                    if (moveTarget == patrolPointA) {
+                        currentPatrolTarget = patrolPointB;
+                    }
+                    else{
+                        currentPatrolTarget = patrolPointA;
+                    }
+                    moveTarget = currentPatrolTarget;
+                }
+
+                calculateMovementPhysics();
                 break;
 
             case GATHER:
+                //check if in need of a valid minable patch
+                boolean needNewTarget = false;
+                //check if the resource is still there first
+                if (miningTarget == null || !miningTarget.isActive()) {
+                    needNewTarget = true;
+                }
+                else {
+                    var resComp = miningTarget.getComponentOptional(ResourceComponent.class).orElse(null);
+                    //check if it exists or has minerals left
+                    if (resComp == null || resComp.hpProperty().get() <= 0) {
+                        needNewTarget = true;
+                    }
+                }
+                //if needed, find a new patch within the case
+                if (needNewTarget) {
+                    miningTarget = scanAroundMine();
+                    //found mineral, stop movement to go to new patch
+                    if (miningTarget != null) {
+                        moveTarget = null;
+                    }
+                    //no minerals found
+                    else {
+                        state = UnitState.IDLE;
+                    }
+                    return;
+                }
+                //move towards mineral
+                if (moveTarget == null) moveTarget = miningTarget.getCenter();
+                //calculate distance to mineral patch
+                double distToMine = entity.getCenter().distance(miningTarget.getCenter());
+                //get effective range needed for mining, +5 for buffer
+                double combinedDistance = (entity.getWidth() / 2.0) + (miningTarget.getWidth() / 2.0) + 5;
+                //if close enough, mine
+                if (distToMine < combinedDistance) {
+                    //stop moving before mining
+                    moveTarget = null;
+                    finalVelocity = Point2D.ZERO;
+                    if (miningTimer <= 0.0) {
+                        //mine
+                        performMining();
+                        miningTimer = 1.0;
+                        //return cargo
+                        if (resourceCarried >= COLLECTION_CAPACITY) {
+                            //try to find cc to return to if there's none
+                            if (returnTarget == null) {
+                                returnTarget = scanAroundCC();
+                            }
+                            //found cc, return
+                            if (returnTarget != null) {
+                                state = UnitState.RETURN_CARGO;
+                                moveTarget = null;
+                            }
+                            //no cc found
+                            else {
+                                System.out.println("No command centre found!");
+                                state = UnitState.IDLE;
+                            }
+                        }
+                    }
+                }
+                //if we're still too far from resource, keep moving
+                else {
+                    calculateMovementPhysics();
+                }
 
                 break;
 
             case RETURN_CARGO:
-
+                //check for return cc
+                if (returnTarget == null || !returnTarget.isActive()) {
+                    returnTarget = scanAroundCC();
+                    //can't find cc -> idle
+                    if (returnTarget == null) {
+                        state = UnitState.IDLE;
+                        return;
+                    }
+                }
+                //move towards cc
+                if (moveTarget == null) moveTarget = returnTarget.getCenter();
+                //calculate distance to cc
+                double distToCC = entity.getCenter().distance(returnTarget.getCenter());
+                //drop-off range with +5 buffer
+                double combinedDistanceCC = (entity.getWidth() / 2.0) + (returnTarget.getWidth() / 2.0) + 5;
+                //if close enough, return
+                if (distToCC < combinedDistanceCC) {
+                    returnResources();
+                    //return to mineral again
+                    if (miningTarget == null || !miningTarget.isActive()) {
+                        miningTarget = scanAroundMine();
+                    }
+                    //if there's a resource patch found, return to mine
+                    if (miningTarget != null) {
+                        moveTarget = null;
+                        state = UnitState.GATHER;
+                    }
+                    //otherwise go into idle
+                    else{
+                        state = UnitState.IDLE;
+                    }
+                }
+                //not close enough -> keep moving
+                else {
+                    calculateMovementPhysics();
+                }
                 break;
 
         }
@@ -158,18 +356,66 @@ public class UnitComponent extends EntityComponent {
 
     }
 
+    public boolean isWorker() {
+        return stats.isWorker();
+    }
+
+    public boolean hasCargo() {
+        return resourceCarried > 0;
+    }
+
+    private void returnResources() {
+        this.getOwner().setMinerals(this.getOwner().getMinerals() + resourceCarried);
+        resourceCarried = 0;
+    }
+
+    public void orderReturnCargo(Entity baseTarget) {
+        this.returnTarget = baseTarget;
+        this.moveTarget = null;
+        this.attackTarget = null;
+        this.miningTarget = null;
+        this.flagPatrol = false;
+        this.flagHold = false;
+        this.flagIsStuck = false;
+        setState(UnitState.RETURN_CARGO);
+    }
+
+    public void orderPatrol(Point2D patrolTarget){
+        this.patrolPointA = entity.getCenter();
+        this.patrolPointB = patrolTarget;
+        this.currentPatrolTarget = patrolPointB;
+        this.moveTarget = currentPatrolTarget;
+        this.attackTarget = null;
+        this.attackMoveDestination = null;
+        this.flagPatrol = true;
+        this.flagHold = false;
+        this.flagIsStuck = false;
+        setState(UnitState.PATROL);
+    }
+
+    public void orderHold(){
+        this.moveTarget = null;
+        this.attackTarget = null;
+        this.attackMoveDestination =  null;
+        this.flagPatrol = false;
+        this.flagHold = true;
+        this.flagIsStuck = false;
+        setState(UnitState.HOLD);
+    }
+
     public void moveAttack(Point2D target) {
         this.moveTarget = target;
         this.attackTarget = null;
         this.attackMoveDestination = target;
         this.flagPatrol = false;
         this.flagIsStuck = false;
+        this.flagHold = false;
         this.settleTimer = 0.0;
         setState(UnitState.ATTACK_MOVE);
     }
 
     //helper that scans around the current unit and finds a valid hostile target
-    public Entity scanAround() {
+    public Entity scanAroundAttack() {
         //find an appropriate scan radius for this unit
         //if ranged, slightly larger, if melee, set to 250
         double scanRadius = Math.max(stats.attackRange() * 1.5, 250);
@@ -184,6 +430,60 @@ public class UnitComponent extends EntityComponent {
                 .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
                 .findFirst()//first found that fits all conditions
                 .orElse(null);//return null if no valid target
+    }
+
+    //helper that scans around the current unit and finds a valid mineral patch
+    public Entity scanAroundMine() {
+
+        var foundEntities = getGameWorld().getEntitiesInRange(
+                new Rectangle2D(entity.getCenter().getX() - MINERAL_SCAN_RANGE, entity.getCenter().getY() - MINERAL_SCAN_RANGE,
+                        MINERAL_SCAN_RANGE * 2, MINERAL_SCAN_RANGE * 2));
+        return foundEntities.stream()
+                .filter(e -> e != entity)//has to be an entity
+                .filter(e -> e.isType(EntityType.RESOURCE))//has to be a resource
+                .filter(e -> e.hasComponent(ResourceComponent.class))//filter resource with logic
+                .filter(e -> e.getComponent(ResourceComponent.class).getResourceType() == 0)//filters for minerals
+                .filter(e -> e.getComponent(ResourceComponent.class).hpProperty().get() > 0)
+                .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
+                .findFirst()//first found that fits all conditions
+                .orElse(null);//return null if no valid target
+    }
+
+    //finds a nearby cc
+    public Entity scanAroundCC() {
+        var foundEntities = getGameWorld().getEntitiesInRange(
+                new Rectangle2D(entity.getCenter().getX() - MINERAL_SCAN_RANGE, entity.getCenter().getY() - MINERAL_SCAN_RANGE,
+                        MINERAL_SCAN_RANGE * 2, MINERAL_SCAN_RANGE * 2));
+        return foundEntities.stream()
+                .filter(e -> e != entity)//has to be an entity
+                .filter(e -> e.isType(EntityType.STRUCTURE))//has to be a resource
+                .filter(e -> e.hasComponent(StructureComponent.class))//filter structure with logic
+                .filter(e -> e.hasComponent(BaseComponent.class))//filters for bases
+                .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
+                .findFirst()//first found that fits all conditions
+                .orElse(null);//return null if no valid target
+    }
+
+    private void performMining(){
+        if(miningTarget != null && miningTarget.hasComponent(ResourceComponent.class)){
+
+            EntityComponent targetStats = getEntityComponent(miningTarget);
+
+            if  (targetStats != null) {
+                int currentResource = targetStats.hpProperty().get();
+                int collected_amount = Math.min(COLLECTION_RATE, currentResource);
+                //calculate space left to clamp to collection capacity
+                int spaceLeft = COLLECTION_CAPACITY - resourceCarried;
+                collected_amount = Math.min(collected_amount, spaceLeft);
+                //add only if actually collected something
+                if(collected_amount > 0){
+                    targetStats.hpProperty().set(currentResource - collected_amount);
+                    resourceCarried += collected_amount;
+                    return;
+                }
+            }
+        }
+        System.out.println("Not a real resource mined!");
     }
 
     //check if we're stuck, if so, raise a flag
@@ -309,6 +609,7 @@ public class UnitComponent extends EntityComponent {
         this.attackMoveDestination =  null;
         this.flagPatrol = false;
         this.flagIsStuck = false;
+        this.flagHold = false;
         this.settleTimer = 0.0;
         setState(UnitState.MOVING);
     }
@@ -419,6 +720,14 @@ public class UnitComponent extends EntityComponent {
         setState(UnitState.ATTACK);
     }
 
+    public void mine(Entity target){
+        this.miningTarget = target;
+        this.moveTarget = null;
+        this.flagIsStuck = false;
+        this.settleTimer = 0.0;
+        setState(UnitState.GATHER);
+    }
+
     //helper to
     private EntityComponent getEntityComponent(Entity entity) {
 
@@ -427,6 +736,9 @@ public class UnitComponent extends EntityComponent {
         }
         else if (entity.hasComponent(StructureComponent.class)) {
             return entity.getComponent(StructureComponent.class);
+        }
+        else if (entity.hasComponent(ResourceComponent.class)) {
+            return entity.getComponent(ResourceComponent.class);
         }
         return null;
     }

@@ -2,14 +2,19 @@ package com.example.rtsg.Structures;
 
 import com.example.rtsg.EntityComponent;
 import com.example.rtsg.Player;
+import com.example.rtsg.RTSCommand;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class StructureComponent extends EntityComponent {
 
     private final StructureStats stats;
+    private List<RTSCommand> commandList =  new ArrayList<RTSCommand>();
 
     private final IntegerProperty hp;
     private final StringProperty name;
@@ -21,6 +26,15 @@ public class StructureComponent extends EntityComponent {
         this.hp = new SimpleIntegerProperty(stats.maxHp());
         this.name = new SimpleStringProperty(stats.name());
         this.armor = new SimpleIntegerProperty(stats.armor());
+    }
+
+    //add an ability/construction to a structure
+    public void addCommand(String buttonText, Runnable action){
+        commandList.add(new RTSCommand(buttonText, action));
+    }
+
+    public List<RTSCommand> getCommandsList() {
+        return commandList;
     }
 
     @Override

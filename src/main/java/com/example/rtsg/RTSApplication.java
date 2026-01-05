@@ -8,6 +8,7 @@ import com.almasb.fxgl.entity.Entity;
 import com.almasb.fxgl.entity.SpawnData;
 import com.almasb.fxgl.input.Input;
 import com.almasb.fxgl.input.UserAction;
+import com.example.rtsg.Resources.ResourceComponent;
 import com.example.rtsg.Structures.StructureComponent;
 import com.example.rtsg.Units.UnitComponent;
 import javafx.application.Application;
@@ -47,6 +48,10 @@ public class RTSApplication extends GameApplication {
     private GridPane controlPanel;
     private HBox miniMapPanel;
     private VBox infoPanel;
+    private HBox topUIBar;
+    private Label mineralLabel;
+    private Label gasLabel;
+    private Label supplyLabel;
 
     private Label nameLabel;
     private Label hpLabel;
@@ -71,6 +76,8 @@ public class RTSApplication extends GameApplication {
     private final int MAP_WIDTH = 3000;
 
     private Player botPlayer1;
+
+    private Player resourcePlayer;
 
     @Override
     protected void initSettings(GameSettings gameSettings) {
@@ -104,14 +111,28 @@ public class RTSApplication extends GameApplication {
         botPlayer1.changeRelation(PlayerManager.getHumanPlayer(), Relation.HOSTILE);
         PlayerManager.addToPlayerList(botPlayer1);
 
+        resourcePlayer = new Player("resource", Color.LIGHTBLUE);
+        resourcePlayer.changeRelation(PlayerManager.getHumanPlayer(), Relation.NEUTRAL);
+        resourcePlayer.changeRelation(botPlayer1, Relation.NEUTRAL);
+        PlayerManager.addToPlayerList(resourcePlayer);
+
         //spawn sample first unit
         spawn("marine", new SpawnData(100, 100).put("owner", PlayerManager.getHumanPlayer()));
-        spawn("scv", new SpawnData(100, 200).put("owner", PlayerManager.getHumanPlayer()));
-        spawn("scv", new SpawnData(100, 220).put("owner", PlayerManager.getHumanPlayer()));
-        spawn("scv", new SpawnData(100, 240).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("marine", new SpawnData(100, 130).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("marine", new SpawnData(100, 160).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("marine", new SpawnData(100, 190).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("marine", new SpawnData(100, 210).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("scv", new SpawnData(100, 270).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("scv", new SpawnData(100, 300).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("scv", new SpawnData(100, 330).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("command_centre", new SpawnData(300, 400).put("owner", PlayerManager.getHumanPlayer()));
 
-        spawn("zergling", new SpawnData(800, 300).put("owner", botPlayer1));
-        //spawn("command_centre", new SpawnData(500, 200).put("owner", Owner.PLAYER));
+        spawn("mineral_large", new SpawnData(100, 400).put("owner", resourcePlayer));
+        spawn("mineral_large", new SpawnData(100, 450).put("owner", resourcePlayer));
+        spawn("mineral_large", new SpawnData(100, 500).put("owner", resourcePlayer));
+
+        //spawn("zergling", new SpawnData(800, 300).put("owner", botPlayer1));
+
         spawn("command_centre", new SpawnData(1300, 1300).put("owner", botPlayer1));
         spawn("command_centre", new SpawnData(2200, 200).put("owner", botPlayer1));
         spawn("command_centre", new SpawnData(500, 2200).put("owner", botPlayer1));
@@ -120,6 +141,8 @@ public class RTSApplication extends GameApplication {
 
     @Override
     protected void initUI(){
+        //top bar ui in helper
+        initTopUI();
 
         //command prompt
         commandInput = new TextField();
@@ -244,6 +267,9 @@ public class RTSApplication extends GameApplication {
                 else if (isAtkMode) {
                     handleAtkCommand(mousePosWorld);
                 }
+                else if (isPatrolMode){
+                    handlePatrolCommand(mousePosWorld);
+                }
                 else{
                     selectionStartPoint = mousePosUI;
                     selectionBox.setVisible(true);
@@ -343,6 +369,9 @@ public class RTSApplication extends GameApplication {
         else if (entity.hasComponent(StructureComponent.class)) {
             return entity.getComponent(StructureComponent.class);
         }
+        else if (entity.hasComponent(ResourceComponent.class)) {
+            return entity.getComponent(ResourceComponent.class);
+        }
         return null;
     }
 
@@ -350,7 +379,7 @@ public class RTSApplication extends GameApplication {
         var targetList = getGameWorld().getEntitiesInRange(new Rectangle2D(mousePos.getX() - 10, mousePos.getY() - 10, 20, 20));
 
         Entity targetEntity = targetList.stream()
-                .filter(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE))
+                .filter(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE) || e.isType(EntityType.RESOURCE))
                 .filter(e -> !selectedUnits.contains(e))
                 .findFirst()
                 .orElse(null);
@@ -367,6 +396,7 @@ public class RTSApplication extends GameApplication {
             });
         }
         isMoveMode = false;
+        getGameScene().setCursor(Cursor.DEFAULT);
     }
 
     private void handleAtkCommand(Point2D mousePos) {
@@ -387,43 +417,28 @@ public class RTSApplication extends GameApplication {
         getGameScene().setCursor(Cursor.DEFAULT); // Reset cursor
     }
 
+    private void handlePatrolCommand(Point2D mousePos) {
+        for (Entity unit : selectedUnits) {
+            unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
+               if (PlayerManager.findPlayerFromID(component.getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
+                   component.orderPatrol(mousePos);
+               }
+            });
+        }
+        isPatrolMode = false;
+        getGameScene().setCursor(Cursor.DEFAULT);
+    }
+
     private void handleRightClick(Point2D mousePos) {
         Entity targetEntity = findTargetAt(mousePos);
-
+        RightClickCommandHelper.executeSmartCommand(selectedUnits, targetEntity, mousePos);
         if (targetEntity != null) {
             System.out.println("Right-Click Hit: " + targetEntity.getType());
         } else {
             System.out.println("Right-Click Hit: Ground at " + mousePos);
         }
-        for  (Entity unit : selectedUnits) {
-            unit.getComponentOptional(UnitComponent.class).ifPresent(component -> {
-                if (PlayerManager.findPlayerFromID(component.getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
-                    //clicked on unit
-                    if(targetEntity != null) {
-                        EntityComponent targetComp = getEntityComponent(targetEntity);
-                        //if target has logic
-                        Player targetOwner = PlayerManager.findPlayerFromID(targetComp.getOwner().getPlayerID());
-                        if (targetComp != null && PlayerManager.getHumanPlayer().getStance(targetOwner) == Relation.HOSTILE) {
-                            System.out.println("Command: ATTACK");
-                            component.attack(targetEntity);
-                        }
-                        else {
-                            System.out.println("Command: FOLLOW/MOVE TO UNIT");
-                            Point2D targetCenter = targetEntity.getCenter().subtract(unit.getWidth()/2, unit.getHeight()/2);
-                            component.moveTo(targetCenter);
-                        }
-                    }
-                    //clicked on empty ground
-                    else{
-                        System.out.println("Command: MOVE TO GROUND");
-                        component.moveTo(getInput().getMousePositionWorld());
-                    }
-                }
-            });
-        }
 
     }
-
 
     private void performDragSelection(Rectangle2D selectionRect) {
 
@@ -466,15 +481,17 @@ public class RTSApplication extends GameApplication {
         if(PlayerManager.findPlayerFromID(getEntityComponent(selectedEntity).getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.SELF) {
             //if selected entity is unit
             if (selectedEntity.hasComponent(UnitComponent.class)) {
-                moveButton = new Button("Move");
-                moveButton.setPrefSize(90, 90);
+                UnitComponent unitComp = selectedEntity.getComponent(UnitComponent.class);
+                moveButton = createCommandButton("Move");
                 moveButton.setOnAction(event -> {
                     isMoveMode = true;
+                    isAtkMode = false;
+                    isPatrolMode = false;
+                    getGameScene().setCursor(Cursor.CROSSHAIR);
                 });
                 controlPanel.add(moveButton, 0, 0);
 
-                stopButton = new Button("Stop");
-                stopButton.setPrefSize(90, 90);
+                stopButton = createCommandButton("Stop");
                 stopButton.setOnMouseClicked(e -> {
                     for (Entity unit : selectedUnits) {
                         if (unit.hasComponent(UnitComponent.class)) {
@@ -482,48 +499,82 @@ public class RTSApplication extends GameApplication {
                             unit.getComponent(UnitComponent.class).moveTo(unit.getPosition());
                         }
                     }
+                    isMoveMode = false;
+                    isAtkMode = false;
+                    isPatrolMode = false;
+                    getGameScene().setCursor(Cursor.DEFAULT);
                 });
                 controlPanel.add(stopButton, 1, 0);
 
-                atkButton = new Button("Atk");
-                atkButton.setPrefSize(90, 90);
+                atkButton = createCommandButton("Atk");
                 atkButton.setOnAction(event -> {
                     if (!selectedUnits.isEmpty()) {
                         isAtkMode = true;
                         isMoveMode = false;
                         isPatrolMode = false;
+                        getGameScene().setCursor(Cursor.CROSSHAIR);
                     }
                 });
                 controlPanel.add(atkButton, 2, 0);
 
-                patrolButton = new Button("Patrol");
-                patrolButton.setPrefSize(90, 90);
+                patrolButton = createCommandButton("Patrol");
                 patrolButton.setOnAction(event -> {
                     if (!selectedUnits.isEmpty()) {
                         isPatrolMode = true;
+                        isMoveMode = false;
+                        isAtkMode = false;
+                        getGameScene().setCursor(Cursor.CROSSHAIR);
                     }
                 });
                 controlPanel.add(patrolButton, 0, 1);
 
-                holdButton = new Button("Hold");
-                holdButton.setPrefSize(90, 90);
+                holdButton = createCommandButton("Hold");
                 holdButton.setOnAction(event -> {
                     if (!selectedUnits.isEmpty()) {
-                        isHoldMode = true;
+                        for (Entity unit : selectedUnits) {
+                            unit.getComponentOptional(UnitComponent.class).ifPresent(UnitComponent::orderHold);
+                        }
+                        isMoveMode = false;
+                        isAtkMode = false;
+                        isPatrolMode = false;
+                        getGameScene().setCursor(Cursor.DEFAULT);
                     }
                 });
                 controlPanel.add(holdButton, 1, 1);
+                //worker specific buttons
+                if (unitComp.isWorker()) {
+                    Button returnButton = createCommandButton("Return");
+                    returnButton.setOnAction(e -> {
+                        issueReturnCommand(selectedUnits);
+                    });
+                    controlPanel.add(returnButton, 2, 1);
+                }
             }
             //if selected entity is structure
             else if (selectedEntity.hasComponent(StructureComponent.class)) {
-                Button btnTrain = new Button("Train Marine");
-                btnTrain.setPrefSize(90, 90);
-                btnTrain.setOnAction(e -> {
-                    System.out.println("Training Marine...");
-                    // Add training logic here later
-                });
+                //get
+                StructureComponent structureComponent = selectedEntity.getComponent(StructureComponent.class);
+                List<RTSCommand> actions = structureComponent.getCommandsList();
 
-                controlPanel.add(btnTrain, 0, 0);
+                //fills up from top left
+                int col = 0;
+                int row = 0;
+                
+                for  (RTSCommand command : actions) {
+                    Button button = createCommandButton(command.getName());
+                    button.setOnAction(event -> command.execute());
+                    
+                    controlPanel.add(button, col, row);
+                    //go through all 9 spots
+                    col++;
+                    if (col > 2){
+                        col = 0;
+                        row++;
+                    }
+                }
+                if (row > 2 && col > 2){
+                    System.out.println("Too many commands!");
+                }
             }
         }
         else if (PlayerManager.findPlayerFromID(getEntityComponent(selectedEntity).getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) == Relation.HOSTILE) {
@@ -541,6 +592,51 @@ public class RTSApplication extends GameApplication {
             controlDescriptionLabel.setStyle("-fx-text-fill: yellow; -fx-font-size: 20px");
             controlPanel.add(controlOwnerLabel, 0, 0);
             controlPanel.add(controlDescriptionLabel, 0, 1);
+        }
+    }
+
+    private Button createCommandButton(String text) {
+        Button btn = new Button(text);
+        btn.setPrefSize(90, 90);
+
+        // Define the styles as strings
+        String styleNormal = "-fx-background-color: #333333; -fx-text-fill: white; -fx-border-color: gold; -fx-border-width: 2px; -fx-font-weight: bold; -fx-font-size: 14px;";
+        String styleHover  = "-fx-background-color: #444444; -fx-text-fill: white; -fx-border-color: #FFD700; -fx-border-width: 2px; -fx-font-weight: bold; -fx-font-size: 14px;";
+        String stylePress  = "-fx-background-color: #111111; -fx-text-fill: #AAAAAA; -fx-border-color: #B8860B; -fx-border-width: 2px; -fx-font-weight: bold; -fx-font-size: 14px;";
+
+        // Set initial style
+        btn.setStyle(styleNormal);
+
+        // Add interactions
+        btn.setOnMouseEntered(e -> {
+            if (!btn.isPressed()) btn.setStyle(styleHover);
+        });
+
+        btn.setOnMouseExited(e -> {
+            if (!btn.isPressed()) btn.setStyle(styleNormal);
+        });
+
+        btn.setOnMousePressed(e -> btn.setStyle(stylePress));
+
+        btn.setOnMouseReleased(e -> {
+            // If mouse is still over the button, go back to hover, else normal
+            if (btn.isHover()) btn.setStyle(styleHover);
+            else btn.setStyle(styleNormal);
+        });
+
+        return btn;
+    }
+
+    private void issueReturnCommand(List<Entity> selectedUnits) {
+        for (Entity unit : selectedUnits) {
+           unit.getComponentOptional(UnitComponent.class).ifPresent(comp -> {
+               if (comp.isWorker() && comp.hasCargo()) {
+                   Entity nearestBase = comp.scanAroundCC();
+                   if (nearestBase != null) {
+                       comp.orderReturnCargo(nearestBase);
+                   }
+               }
+           });
         }
     }
 
@@ -580,6 +676,68 @@ public class RTSApplication extends GameApplication {
                 break;
         }
 
+    }
+
+    private void initTopUI(){
+        //bar itself (no bg)
+        topUIBar = new HBox(20);
+        topUIBar.setPrefSize(FXGL.getAppWidth(), 40);
+        topUIBar.setPadding(new Insets(5, 20, 5, 20));
+        topUIBar.setAlignment(Pos.CENTER_RIGHT);
+        topUIBar.setBackground(new Background(new BackgroundFill(Color.rgb(0,0,0,0.7), CornerRadii.EMPTY, Insets.EMPTY)));
+
+        //minerals
+        HBox mineralBox = createResourceGroup(Color.CYAN, "0");
+        mineralLabel = (Label) mineralBox.getChildren().get(1);
+
+        //gas
+        HBox gasBox = createResourceGroup(Color.LIMEGREEN, "0");
+        gasLabel = (Label) gasBox.getChildren().get(1);
+
+        //supply
+        HBox supplyBox = createResourceGroup(Color.WHITE, "0/200");
+        supplyLabel = (Label) supplyBox.getChildren().get(1);
+
+        //add all to topuibar
+        topUIBar.getChildren().addAll(mineralBox,gasBox,supplyBox);
+
+        //bind labels to human
+        Player human = PlayerManager.getHumanPlayer();
+        mineralLabel.textProperty().bind(human.mineralsProperty().asString());
+        gasLabel.textProperty().bind(human.gasProperty().asString());
+        human.currentSupplyProperty().addListener((observable, oldValue, newValue) -> {
+            updateSupplyLabel(human);
+        });
+        human.maxSupplyProperty().addListener((obs, o, n) -> {
+            updateSupplyLabel(human);
+        });
+        //add it
+        addUINode(topUIBar);
+    }
+
+    //helper to create icon-resource hbox
+    private HBox createResourceGroup(Color color, String text) {
+        HBox resourceGroup = new HBox(10);
+        resourceGroup.setAlignment(Pos.CENTER_LEFT);
+
+        Rectangle icon = new Rectangle(20, 20, color);
+        icon.setStroke(Color.GRAY);
+
+        // New way
+        //var iconTexture = FXGL.texture("mineral_icon.png", 20, 20); // Resizes to 20x20
+        //resourceGroup.getChildren().addAll(iconTexture, label);
+
+        Label label = new Label(text);
+        label.setTextFill(Color.WHITE);
+        label.setStyle("-fx-font-size: 16px; -fx-font-weight: bold");
+
+        resourceGroup.getChildren().addAll(icon, label);
+        return resourceGroup;
+    }
+
+    //helper to update and format supply
+    private void updateSupplyLabel(Player player) {
+        supplyLabel.setText(player.getCurrentSupply() + " / " + player.getMaxSupply());
     }
 
 }

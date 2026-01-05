@@ -1,5 +1,7 @@
 package com.example.rtsg;
 
+import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.SimpleIntegerProperty;
 import javafx.scene.paint.Color;
 
 import java.util.HashMap;
@@ -11,11 +13,22 @@ public class Player {
     private String playerID;
     private Color playerColor;
     private Map<Player, Relation> playerRelationMap;
+
+    private IntegerProperty minerals = new SimpleIntegerProperty(0);
+    private IntegerProperty gas = new SimpleIntegerProperty(0);
+    private IntegerProperty currSupply = new SimpleIntegerProperty(0);
+    private IntegerProperty maxSupply = new SimpleIntegerProperty(18);
+
     public Player(String playerID, Color playerColor) {
         this.playerID = playerID;
         this.playerColor = playerColor;
         playerRelationMap = new HashMap<Player, Relation>();
     }
+
+    public IntegerProperty mineralsProperty() { return minerals; }
+    public IntegerProperty gasProperty() { return gas; }
+    public IntegerProperty currentSupplyProperty() { return currSupply; }
+    public IntegerProperty maxSupplyProperty() { return maxSupply; }
 
     public void changeRelation(Player player, Relation relation) {
         playerRelationMap.put(player, relation);
@@ -62,5 +75,32 @@ public class Player {
         return Objects.hash(playerID);
     }
 
+    public int getMinerals() {
+        return minerals.get();
+    }
+    public void setMinerals(int minerals) {
+        this.minerals.set(minerals);
+    }
+
+    public int getGas() {
+        return gas.get();
+    }
+    public void setGas(int gas) {
+        this.gas.set(gas);
+    }
+
+    public int getCurrentSupply() {
+        return currSupply.get();
+    }
+    public void setCurrentSupply(int currentSupply) {
+        this.currSupply.set(currentSupply);
+    }
+
+    public int getMaxSupply() {
+        return maxSupply.get();
+    }
+    public void setMaxSupply(int maxSupply) {
+        this.maxSupply.set(maxSupply);
+    }
 
 }

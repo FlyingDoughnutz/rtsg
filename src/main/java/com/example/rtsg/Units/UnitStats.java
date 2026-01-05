@@ -7,5 +7,6 @@ public record UnitStats(
         double attackRange,
         double attackDamage,
         double attackSpeed,
-        int armor
+        int armor,
+        boolean isWorker
 ) {}

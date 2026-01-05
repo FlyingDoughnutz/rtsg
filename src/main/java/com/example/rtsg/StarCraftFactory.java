@@ -2,6 +2,9 @@ package com.example.rtsg;
 
 import com.almasb.fxgl.physics.BoundingShape;
 import com.almasb.fxgl.physics.HitBox;
+import com.example.rtsg.Resources.ResourceComponent;
+import com.example.rtsg.Resources.ResourceStats;
+import com.example.rtsg.Structures.BaseComponent;
 import com.example.rtsg.Structures.StructureComponent;
 import com.example.rtsg.Structures.StructureStats;
 import com.example.rtsg.Units.UnitComponent;
@@ -15,6 +18,7 @@ import javafx.geometry.Point2D;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 
+import static com.almasb.fxgl.dsl.FXGL.spawn;
 import static com.almasb.fxgl.dsl.FXGLForKtKt.entityBuilder;
 
 public class StarCraftFactory implements EntityFactory {
@@ -22,7 +26,7 @@ public class StarCraftFactory implements EntityFactory {
     @Spawns("marine")
     public Entity newMarine(SpawnData data) {
 
-        UnitStats marineStats = new UnitStats("Marine", 70, 150, 150, 7, 0.5, 1);
+        UnitStats marineStats = new UnitStats("Marine", 70, 125, 150, 7, 0.5, 1, false);
 
         Player owner = data.get("owner");
 
@@ -39,7 +43,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("scv")
     public Entity newSCV(SpawnData data) {
-        UnitStats scvStats = new UnitStats("SCV", 60, 150, 15, 5, 1, 0);
+        UnitStats scvStats = new UnitStats("SCV", 60, 125, 15, 5, 1, 0, true);
         Player owner = data.get("owner");
         UnitComponent scvComponent = new UnitComponent(scvStats, owner);
         return entityBuilder(data)
@@ -53,7 +57,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("zergling")
     public Entity newZergling(SpawnData data) {
-        UnitStats zerglingStats = new UnitStats("Zergling", 45, 250, 15, 6, 0.8, 0);
+        UnitStats zerglingStats = new UnitStats("Zergling", 45, 200, 15, 6, 0.8, 0, false);
         Player owner = data.get("owner");
         UnitComponent zerglingComponent = new UnitComponent(zerglingStats, owner);
         return entityBuilder(data)
@@ -70,13 +74,55 @@ public class StarCraftFactory implements EntityFactory {
         StructureStats ccStats = new StructureStats("Command Centre", 1600, 0);
         Player owner = data.get("owner");
         StructureComponent ccComponent = new StructureComponent(ccStats, owner);
+        ccComponent.addCommand("Train SCV", () -> {
+            System.out.println("Queued SCV");
+            //logic for production
+        });
+        ccComponent.addCommand("Lift Off", () -> {
+            System.out.println("Lifting off...");
+            // Logic to switch state to FLYING
+        });
         return entityBuilder(data)
                 .type(EntityType.STRUCTURE)
                 .bbox(new HitBox(BoundingShape.box(150,150)))
                 .view(new Rectangle(150, 150, owner.getPlayerColor()))
                 .with(ccComponent)
                 .with(new HealthBarComponent(ccComponent))
+                .with(new BaseComponent())
                 .build();
     }
+
+    @Spawns("barracks")
+    public Entity newBarracks(SpawnData data) {
+        StructureStats barracksStats = new StructureStats("Barracks", 1000, 0);
+        Player owner = data.get("owner");
+        StructureComponent barracksComponent = new StructureComponent(barracksStats, owner);
+        barracksComponent.addCommand("Marines", () -> {
+            //
+        });
+        barracksComponent.addCommand("Marauders", () -> {
+           //hhq
+        });
+        return entityBuilder(data)
+                .type(EntityType.STRUCTURE)
+                .bbox(new HitBox(BoundingShape.box(150,150)))
+                .view(new Rectangle(150, 150, owner.getPlayerColor()))
+                .with(barracksComponent)
+                .with(new HealthBarComponent(barracksComponent))
+                .build();
+    }
+
+    @Spawns("mineral_large")
+    public Entity newMineralLarge(SpawnData data) {
+        ResourceStats mineralLargeStats = new ResourceStats("Large Mineral Field", 50, 0);
+        Player owner = data.get("owner");
+        ResourceComponent mineralLargeComponent = new ResourceComponent(mineralLargeStats, owner);
+        return entityBuilder(data)
+                .type(EntityType.RESOURCE)
+                .viewWithBBox(new Rectangle(60, 30, owner.getPlayerColor()))
+                .with(mineralLargeComponent)
+                .build();
+    }
+
 
 }
