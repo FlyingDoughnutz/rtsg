@@ -44,7 +44,6 @@ public class RTSApplication extends GameApplication {
     private boolean isMoveMode = false;
     private boolean isAtkMode = false;
     private boolean isPatrolMode = false;
-    private boolean isHoldMode = false;
 
     private HBox bottomUIBar;
     private GridPane controlPanel;
@@ -128,12 +127,17 @@ public class RTSApplication extends GameApplication {
         spawn("scv", new SpawnData(100, 300).put("owner", PlayerManager.getHumanPlayer()));
         spawn("scv", new SpawnData(100, 330).put("owner", PlayerManager.getHumanPlayer()));
         spawn("command_centre", new SpawnData(300, 400).put("owner", PlayerManager.getHumanPlayer()));
-        spawn("barracks", new SpawnData(600, 430).put("owner", PlayerManager.getHumanPlayer()));
+        spawn("barracks", new SpawnData(700, 500).put("owner", PlayerManager.getHumanPlayer()));
 
         spawn("mineral_large", new SpawnData(100, 400).put("owner", resourcePlayer));
         spawn("mineral_large", new SpawnData(100, 450).put("owner", resourcePlayer));
         spawn("mineral_large", new SpawnData(100, 500).put("owner", resourcePlayer));
+        spawn("mineral_large", new SpawnData(100, 550).put("owner", resourcePlayer));
 
+        spawn("mineral_small", new SpawnData(130, 420).put("owner", resourcePlayer));
+        spawn("mineral_small", new SpawnData(130, 470).put("owner", resourcePlayer));
+        spawn("mineral_small", new SpawnData(130, 520).put("owner", resourcePlayer));
+        spawn("mineral_small", new SpawnData(130, 570).put("owner", resourcePlayer));
         //spawn("zergling", new SpawnData(800, 300).put("owner", botPlayer1));
 
         spawn("command_centre", new SpawnData(1300, 1300).put("owner", botPlayer1));
@@ -189,14 +193,14 @@ public class RTSApplication extends GameApplication {
         infoPanel = new VBox(5, nameLabel, hpLabel);
         infoPanel.setPadding(new Insets(10));
         infoPanel.setBackground(new Background(new BackgroundFill(Color.rgb(0,0,0,0.7), CornerRadii.EMPTY, Insets.EMPTY)));
-        infoPanel.setPrefSize(800, 150);
+        infoPanel.setPrefSize(600, 150);
         infoPanel.setMaxHeight(150);
         infoPanel.setBorder(new Border(new BorderStroke(Color.GOLD, BorderStrokeStyle.SOLID, CornerRadii.EMPTY, BorderWidths.DEFAULT)));
         HBox.setHgrow(infoPanel, Priority.ALWAYS);
 
         controlPanel = new GridPane();
 
-        controlPanel.setPrefSize(300, 300);
+        controlPanel.setPrefSize(500, 300);
         controlPanel.setPadding(new Insets(10));
         controlPanel.setHgap(5);
         controlPanel.setVgap(5);
@@ -518,7 +522,7 @@ public class RTSApplication extends GameApplication {
                         getGameScene().setCursor(Cursor.CROSSHAIR);
                     }
                 });
-                controlPanel.add(atkButton, 2, 0);
+                controlPanel.add(atkButton, 4, 0);
 
                 patrolButton = createCommandButton("Patrol");
                 patrolButton.setOnAction(event -> {
@@ -529,7 +533,7 @@ public class RTSApplication extends GameApplication {
                         getGameScene().setCursor(Cursor.CROSSHAIR);
                     }
                 });
-                controlPanel.add(patrolButton, 0, 1);
+                controlPanel.add(patrolButton, 3, 0);
 
                 holdButton = createCommandButton("Hold");
                 holdButton.setOnAction(event -> {
@@ -543,14 +547,14 @@ public class RTSApplication extends GameApplication {
                         getGameScene().setCursor(Cursor.DEFAULT);
                     }
                 });
-                controlPanel.add(holdButton, 1, 1);
+                controlPanel.add(holdButton, 2, 0);
                 //worker specific buttons
                 if (unitComp.isWorker()) {
                     Button returnButton = createCommandButton("Return");
                     returnButton.setOnAction(e -> {
                         issueReturnCommand(selectedUnits);
                     });
-                    controlPanel.add(returnButton, 2, 1);
+                    controlPanel.add(returnButton, 0, 1);
                 }
             }
             //if selected entity is structure

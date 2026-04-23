@@ -5,6 +5,7 @@ import com.almasb.fxgl.physics.HitBox;
 import com.example.rtsg.Resources.ResourceComponent;
 import com.example.rtsg.Resources.ResourceStats;
 import com.example.rtsg.Structures.BaseComponent;
+import com.example.rtsg.Structures.ProductionComponent;
 import com.example.rtsg.Structures.StructureComponent;
 import com.example.rtsg.Structures.StructureStats;
 import com.example.rtsg.Units.UnitComponent;
@@ -12,6 +13,7 @@ import com.almasb.fxgl.entity.Entity;
 import com.almasb.fxgl.entity.EntityFactory;
 import com.almasb.fxgl.entity.SpawnData;
 import com.almasb.fxgl.entity.Spawns;
+import com.example.rtsg.Units.UnitDatabase;
 import com.example.rtsg.Units.UnitStats;
 import com.almasb.fxgl.entity.component.Component;
 import javafx.geometry.Point2D;
@@ -26,7 +28,7 @@ public class StarCraftFactory implements EntityFactory {
     @Spawns("marine")
     public Entity newMarine(SpawnData data) {
 
-        UnitStats marineStats = new UnitStats("Marine", 70, 125, 150, 7, 0.5, 1, false, 1);
+        UnitStats marineStats = UnitDatabase.getStats("marine");
 
         Player owner = data.get("owner");
 
@@ -43,7 +45,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("scv")
     public Entity newSCV(SpawnData data) {
-        UnitStats scvStats = new UnitStats("SCV", 60, 125, 15, 5, 1, 0, true, 1);
+        UnitStats scvStats = UnitDatabase.getStats("scv");
         Player owner = data.get("owner");
         UnitComponent scvComponent = new UnitComponent(scvStats, owner);
         return entityBuilder(data)
@@ -57,7 +59,7 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("zergling")
     public Entity newZergling(SpawnData data) {
-        UnitStats zerglingStats = new UnitStats("Zergling", 45, 200, 15, 6, 0.8, 0, false, 1);
+        UnitStats zerglingStats = UnitDatabase.getStats("zergling");
         Player owner = data.get("owner");
         UnitComponent zerglingComponent = new UnitComponent(zerglingStats, owner);
         return entityBuilder(data)
@@ -71,12 +73,13 @@ public class StarCraftFactory implements EntityFactory {
 
     @Spawns("command_centre")
     public Entity newCommandCentre(SpawnData data) {
-        StructureStats ccStats = new StructureStats("Command Centre", 1600, 0, 15);
+        StructureStats ccStats = new StructureStats("Command Centre", 2500, 1, 15);
         Player owner = data.get("owner");
         StructureComponent ccComponent = new StructureComponent(ccStats, owner);
+        ProductionComponent prodComponent = new ProductionComponent(owner);
         ccComponent.addCommand("Train SCV", () -> {
             System.out.println("Queued SCV");
-            //logic for production
+            prodComponent.buildUnit("scv");
         });
         ccComponent.addCommand("Lift Off", () -> {
             System.out.println("Lifting off...");
@@ -89,12 +92,13 @@ public class StarCraftFactory implements EntityFactory {
                 .with(ccComponent)
                 .with(new HealthBarComponent(ccComponent))
                 .with(new BaseComponent())
+                .with(prodComponent)
                 .build();
     }
 
     @Spawns("barracks")
     public Entity newBarracks(SpawnData data) {
-        StructureStats barracksStats = new StructureStats("Barracks", 1000, 0, 0);
+        StructureStats barracksStats = new StructureStats("Barracks", 1000, 1, 0);
         Player owner = data.get("owner");
         StructureComponent barracksComponent = new StructureComponent(barracksStats, owner);
         barracksComponent.addCommand("Marines", () -> {
@@ -105,22 +109,35 @@ public class StarCraftFactory implements EntityFactory {
         });
         return entityBuilder(data)
                 .type(EntityType.STRUCTURE)
-                .bbox(new HitBox(BoundingShape.box(150,150)))
-                .view(new Rectangle(150, 150, owner.getPlayerColor()))
+                .bbox(new HitBox(BoundingShape.box(90,90)))
+                .view(new Rectangle(90, 90, owner.getPlayerColor()))
                 .with(barracksComponent)
                 .with(new HealthBarComponent(barracksComponent))
+                .with(new ProductionComponent(owner))
                 .build();
     }
 
     @Spawns("mineral_large")
     public Entity newMineralLarge(SpawnData data) {
-        ResourceStats mineralLargeStats = new ResourceStats("Large Mineral Field", 50, 0);
+        ResourceStats mineralLargeStats = new ResourceStats("Large Mineral Field", 1800, 0);
         Player owner = data.get("owner");
         ResourceComponent mineralLargeComponent = new ResourceComponent(mineralLargeStats, owner);
         return entityBuilder(data)
                 .type(EntityType.RESOURCE)
                 .viewWithBBox(new Rectangle(60, 30, owner.getPlayerColor()))
                 .with(mineralLargeComponent)
+                .build();
+    }
+
+    @Spawns("mineral_small")
+    public Entity newMineralSmall(SpawnData data) {
+        ResourceStats mineralSmallStats = new ResourceStats("Small Mineral Field", 900, 0);
+        Player owner = data.get("owner");
+        ResourceComponent mineralSmallComponent = new ResourceComponent(mineralSmallStats, owner);
+        return entityBuilder(data)
+                .type(EntityType.RESOURCE)
+                .viewWithBBox(new Rectangle(60, 30, owner.getPlayerColor()))
+                .with(mineralSmallComponent)
                 .build();
     }
 

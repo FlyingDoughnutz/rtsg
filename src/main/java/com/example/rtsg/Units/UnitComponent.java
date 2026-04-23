@@ -40,8 +40,8 @@ public class UnitComponent extends EntityComponent {
     private Point2D finalVelocity = new Point2D(0, 0);
     private boolean flagIsStuck = false;
 
-    private final int COLLECTION_RATE = 2;
-    private final int COLLECTION_CAPACITY = 8;
+    private final int COLLECTION_RATE = 1;
+    private final int COLLECTION_CAPACITY = 5;
     private double miningTimer = 0.0;
     private final int MINERAL_SCAN_RANGE = 200;
     private double scanMiningTimer = 0.0;

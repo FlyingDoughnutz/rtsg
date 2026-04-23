@@ -9,5 +9,7 @@ public record UnitStats(
         double attackSpeed,
         int armor,
         boolean isWorker,
-        int supplyCost
+        int supplyCost,
+        int unitMineralCost,
+        int buildTime
 ) {}
