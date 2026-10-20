@@ -2,6 +2,8 @@ package com.example.rtsg;
 
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.SimpleIntegerProperty;
+import javafx.beans.property.ReadOnlyIntegerProperty;
+import javafx.beans.property.ReadOnlyIntegerWrapper;
 import javafx.scene.paint.Color;
 
 import java.util.HashMap;
@@ -18,6 +20,7 @@ public class Player {
     private IntegerProperty gas = new SimpleIntegerProperty(0);
     private IntegerProperty currSupply = new SimpleIntegerProperty(0);
     private IntegerProperty maxSupply = new SimpleIntegerProperty(0);
+    private final ReadOnlyIntegerWrapper reservedSupply = new ReadOnlyIntegerWrapper(0);
 
     public Player(String playerID, Color playerColor) {
         this.playerID = playerID;
@@ -29,14 +32,39 @@ public class Player {
     public IntegerProperty gasProperty() { return gas; }
     public IntegerProperty currentSupplyProperty() { return currSupply; }
     public IntegerProperty maxSupplyProperty() { return maxSupply; }
+    public ReadOnlyIntegerProperty reservedSupplyProperty() { return reservedSupply.getReadOnlyProperty(); }
+
+    public int getReservedSupply() { return reservedSupply.get(); }
+
+    // Reservations belong to the player so separate buildings cannot spend the same supply.
+    public boolean tryReserveSupply(int amount) {
+        if (amount < 0) throw new IllegalArgumentException("Supply must be non-negative");
+        if ((long) getCurrentSupply() + getReservedSupply() + amount > getMaxSupply()) {
+            return false;
+        }
+        reservedSupply.set(getReservedSupply() + amount);
+        return true;
+    }
+
+    public void releaseReservedSupply(int amount) {
+        if (amount < 0 || amount > getReservedSupply()) {
+            throw new IllegalArgumentException("Cannot release unreserved supply");
+        }
+        reservedSupply.set(getReservedSupply() - amount);
+    }
 
     public void changeRelation(Player player, Relation relation) {
         playerRelationMap.put(player, relation);
     }
 
     public Relation getStance(Player otherPlayer){
+        //a null player (an entity spawned without a valid owner) is never "self",
+        //so treat it as neutral instead of throwing
+        if (otherPlayer == null){
+            return Relation.NEUTRAL;
+        }
         //return ally if it's the player itself
-        if(otherPlayer.playerID.equals(this.playerID)){
+        if(Objects.equals(otherPlayer.playerID, this.playerID)){
             return Relation.SELF;
         }
         //otherwise check the relation

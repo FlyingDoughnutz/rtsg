@@ -45,6 +45,14 @@ public class ResourceComponent extends EntityComponent {
         return stats.resourceAmount();
     }
 
+    @Override
+    protected void onDeath() {
+        //a depleted field is not a dead unit: emptying it must not remove the
+        //entity from the world. Workers already skip patches with 0 left, so
+        //the node stays put as a map feature instead of vanishing mid-game
+        System.out.println(nameProperty().get() + " has been depleted");
+    }
+
     public int getResourceType() {
         return stats.resourceType();
     }

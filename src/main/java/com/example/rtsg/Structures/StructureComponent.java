@@ -39,6 +39,8 @@ public class StructureComponent extends EntityComponent {
 
     @Override
     public void onAdded(){
+        //this component keeps its own death listener, so it must NOT call
+        //super.onAdded() or the structure would be killed twice
         hpProperty().addListener((observable, oldValue, newValue) -> {
             if (newValue.intValue() <= 0) onDeath();
         });

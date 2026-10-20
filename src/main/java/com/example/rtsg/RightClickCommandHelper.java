@@ -7,25 +7,31 @@ import com.example.rtsg.Units.UnitComponent;
 import javafx.geometry.Point2D;
 
 import java.util.List;
-
-import static com.almasb.fxgl.dsl.FXGL.getInput;
+import java.util.Optional;
 
 public class RightClickCommandHelper {
 
+    static Optional<UnitComponent> getCommandableUnit(Entity unit) {
+        if (unit == null || !unit.isActive()) {
+            return Optional.empty();
+        }
+        return unit.getComponentOptional(UnitComponent.class)
+                .filter(component -> component.hpProperty().get() > 0)
+                .filter(PlayerManager::isOwnedByHuman);
+    }
+
     public static void executeSmartCommand(List<Entity> selectedUnits, Entity target, Point2D mousePos) {
+        if (target != null && !target.isActive()) {
+            target = null;
+        }
         for  (Entity unit : selectedUnits) {
-            //get unit component
-            UnitComponent unitComp = unit.getComponentOptional(UnitComponent.class).orElse(null);
-            //skip the entity if not unit
+            UnitComponent unitComp = getCommandableUnit(unit).orElse(null);
             if (unitComp == null) continue;
-            if (PlayerManager.findPlayerFromID(unitComp.getOwner().getPlayerID()).getStance(PlayerManager.getHumanPlayer()) != Relation.SELF) {
-                //skip if we can't control it
-                continue;
-            }
             //clicked on ground
             if(target == null) {
-                System.out.println("Command: MOVE TO GROUND");
-                unitComp.moveTo(getInput().getMousePositionWorld());
+                //use the position handed in with the click instead of re-polling
+                //the mouse, so the command matches the click that triggered it
+                unitComp.moveTo(mousePos);
                 continue;
             }
             //clicked on unit, determine relationship
@@ -37,24 +43,31 @@ public class RightClickCommandHelper {
             }
             //if target has logic and is unit or structure
             boolean isHostile = false;
-            if (targetComp != null) {
-                Player targetOwner = PlayerManager.findPlayerFromID(targetComp.getOwner().getPlayerID());
-                 isHostile = PlayerManager.getHumanPlayer().getStance(targetOwner) == Relation.HOSTILE;
+            if (targetComp != null && targetComp.getOwner() != null) {
+                isHostile = PlayerManager.getHumanPlayer()
+                        .getStance(targetComp.getOwner()) == Relation.HOSTILE;
             }
             //if hostile, attack and move on
             if (isHostile) {
-                System.out.println("Command: ATTACK");
-                unitComp.attack(target);
+                unitComp.orderAttack(target);
+                continue;
+            }
+            //a construction site: workers resume/join construction, others just walk to it
+            if (target.getType() == EntityType.CONSTRUCTION) {
+                if (unitComp.isWorker()) {
+                    unitComp.orderBuild(target);
+                }
+                else {
+                    unitComp.moveTo(target.getCenter());
+                }
                 continue;
             }
             //if resource, collect if worker, move if other unit
             if (target.getType() == EntityType.RESOURCE){
                 if(unitComp.isWorker()) {
-                    System.out.println("Command: MINE RESOURCE");
                     unitComp.mine(target);
                 }
                 else{
-                    System.out.println("Command: MOVE TO RESOURCE");
                     unitComp.moveTo(target.getCenter());
                 }
                 continue;
@@ -64,20 +77,18 @@ public class RightClickCommandHelper {
                 //if cc
                 if (target.hasComponent(BaseComponent.class)){
                     //return cargo if any
-                    if (unitComp.isWorker() && unitComp.hasCargo()) {
-                        System.out.println("Command: RETURN RESOURCE");
+                    if (unitComp.isWorker() && unitComp.hasCargo()
+                            && targetComp != null && PlayerManager.isOwnedByHuman(targetComp)) {
                         unitComp.orderReturnCargo(target);
                     }
                     //move otherwise
                     else {
-                        System.out.println("Command: MOVE TO FRIENDLY STRUCTURE");
                         unitComp.moveTo(target.getCenter());
                     }
                     continue;
                 }
             }
             //default fallback logic is move
-            System.out.println("Command: FOLLOW/MOVE TO UNIT");
             Point2D targetCenter = target.getCenter().subtract(unit.getWidth()/2, unit.getHeight()/2);
             unitComp.moveTo(targetCenter);
 

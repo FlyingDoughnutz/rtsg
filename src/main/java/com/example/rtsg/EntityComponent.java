@@ -14,6 +14,8 @@ public abstract class EntityComponent extends Component {
         this.owner = owner;
     }
 
+    private boolean isDead = false;
+
     @Override
     public void onAdded() {
         hpProperty().addListener((observable, oldValue, newValue) -> {
@@ -22,6 +24,9 @@ public abstract class EntityComponent extends Component {
     }
 
     protected void onDeath() {
+        //hp can be written more than once, so make death idempotent
+        if (isDead) return;
+        isDead = true;
         entity.removeFromWorld();
         System.out.println(nameProperty().get() + " has been destroyed");
     }

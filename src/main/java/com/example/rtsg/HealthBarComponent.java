@@ -76,8 +76,14 @@ public class HealthBarComponent extends Component {
     }
 
     private void updateBarWidth() {
+        //avoid dividing by zero for a target with no max hp
+        int maxHp = stats.getMaxHp();
+        if (maxHp <= 0) {
+            hpBar.setWidth(0);
+            return;
+        }
         //calculate percenteage from 0.0 to 1.0 from hp remaining
-        double percentageHurt = (double) stats.hpProperty().get() / stats.getMaxHp();
+        double percentageHurt = (double) stats.hpProperty().get() / maxHp;
         //clamp between 0 and 1
         percentageHurt = Math.max(0, Math.min(percentageHurt, 1));
         hpBar.setWidth(width * percentageHurt);

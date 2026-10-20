@@ -1,8 +1,8 @@
 package com.example.rtsg.Units;
 
-import com.almasb.fxgl.dsl.FXGL;
 import com.almasb.fxgl.entity.Entity;
 import com.example.rtsg.*;
+import com.example.rtsg.Buildings.ConstructionComponent;
 import com.example.rtsg.Resources.ResourceComponent;
 import com.example.rtsg.Structures.BaseComponent;
 import com.example.rtsg.Structures.StructureComponent;
@@ -10,9 +10,13 @@ import javafx.beans.property.*;
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
 
-import static com.almasb.fxgl.dsl.FXGL.getGameWorld;
+import java.util.Comparator;
+
+import static java.lang.System.Logger.Level.DEBUG;
 
 public class UnitComponent extends EntityComponent {
+
+    private static final System.Logger LOGGER = System.getLogger(UnitComponent.class.getName());
 
     private final UnitStats stats;
 
@@ -37,18 +41,29 @@ public class UnitComponent extends EntityComponent {
     private double scanAttackTimer = 0.0;
     private double settleTimer = 0.0;
     private Point2D lastPosition = Point2D.ZERO;
-    private Point2D finalVelocity = new Point2D(0, 0);
+    private Point2D finalVelocity = Point2D.ZERO;
     private boolean flagIsStuck = false;
 
     private final int COLLECTION_RATE = 1;
     private final int COLLECTION_CAPACITY = 5;
     private double miningTimer = 0.0;
     private final int MINERAL_SCAN_RANGE = 200;
+    //separate from MINERAL_SCAN_RANGE so "how far a worker looks for ore" and
+    //"how far a worker looks for a drop-off" can be tuned independently
+    private final int BASE_SCAN_RANGE = 200;
+    //extra reach past the unit radius when testing "am I next to that rock/base"
+    private static final double GATHER_REACH_SLACK = 8.0;
     private double scanMiningTimer = 0.0;
     private double scanCCTimer = 0.0;
     private Entity miningTarget;
     private Entity returnTarget;
+    private Entity buildTarget;
     private int resourceCarried = 0;
+    //progress tracking for gathering/building: distance to the goal only ever has
+    //to improve, so a unit that jitters in place without getting closer still
+    //counts as stuck
+    private double approachBestDistance = Double.MAX_VALUE;
+    private double approachNoProgressTime = 0.0;
 
     public UnitComponent(UnitStats stats, Player owner) {
         super(owner);
@@ -61,6 +76,8 @@ public class UnitComponent extends EntityComponent {
 
     @Override
     public void onAdded() {
+        //this component keeps its own death listener, so it must NOT call
+        //super.onAdded() or the unit would be killed twice
         hpProperty().addListener((observable, oldValue, newValue) -> {
             if (newValue.intValue() <= 0) onDeath();
         });
@@ -93,7 +110,7 @@ public class UnitComponent extends EntityComponent {
         if (this.stats.isWorker() && miningTimer > 0) miningTimer -= timePerFrame;
         if (flagIsStuck) settleTimer += timePerFrame;
 
-        finalVelocity = new Point2D(0, 0);
+        finalVelocity = Point2D.ZERO;
 
         //State Machine Logic
         switch (state) {
@@ -178,6 +195,30 @@ public class UnitComponent extends EntityComponent {
                     else if (flagHold && moveTarget != null) {
                         moveTarget = null;
                     }
+                    //an attack-move that reaches its destination while shooting
+                    //has arrived: stop chasing and drop the stale destination
+                    else if (attackMoveDestination != null
+                            && entity.getCenter().distance(attackMoveDestination) < 10) {
+                        attackMoveDestination = null;
+                        moveTarget = null;
+                        attackTarget = null;
+                        state = UnitState.IDLE;
+                        flagIsStuck = false;
+                        settleTimer = 0.0;
+                    }
+                    //idle while attacking: still track position so that giving up a
+                    //target that sits behind an obstacle eventually works
+                    else {
+                        updateStuckDetection();
+                        //gave up on the target while stationary
+                        if (flagIsStuck && settleTimer > 0.8) {
+                            attackTarget = null;
+                            moveTarget = null;
+                            flagIsStuck = false;
+                            settleTimer = 0.0;
+                            state = UnitState.IDLE;
+                        }
+                    }
                 }
                 break;
 
@@ -193,9 +234,19 @@ public class UnitComponent extends EntityComponent {
                 }
                 //move towards target point
                 updateMoveLogic();
-                if (moveTarget != null) calculateMovementPhysics();
+                //clear the stored destination once it has actually been reached,
+                //otherwise a unit that fights on the way would later resume a
+                //path it already finished
+                if (attackMoveDestination != null
+                        && entity.getCenter().distance(attackMoveDestination) < 10) {
+                    attackMoveDestination = null;
+                    moveTarget = null;
+                    state = UnitState.IDLE;
+                    flagIsStuck = false;
+                    settleTimer = 0.0;
+                }
+                else if (moveTarget != null) calculateMovementPhysics();
                 else state = UnitState.IDLE;
-                attackMoveDestination = null;
                 break;
 
             case HOLD:
@@ -254,7 +305,16 @@ public class UnitComponent extends EntityComponent {
                 calculateMovementPhysics();
                 break;
 
-            case GATHER:
+            case GATHER: {
+                //A full load is delivered first. The capacity check used to run only
+                //after a successful mine, so a worker whose load was already full
+                //could sit in GATHER forever whenever it could not reach a patch.
+                if (resourceCarried >= COLLECTION_CAPACITY) {
+                    if (!returnToNearestBase()) {
+                        state = UnitState.IDLE;
+                    }
+                    break;
+                }
                 //check if in need of a valid minable patch
                 boolean needNewTarget = false;
                 //check if the resource is still there first
@@ -274,73 +334,75 @@ public class UnitComponent extends EntityComponent {
                     //found mineral, stop movement to go to new patch
                     if (miningTarget != null) {
                         moveTarget = null;
+                        resetPathProgress();
                     }
                     //no minerals found
                     else {
                         state = UnitState.IDLE;
                     }
-                    return;
+                    break;
                 }
                 //move towards mineral
                 if (moveTarget == null) moveTarget = miningTarget.getCenter();
-                //calculate distance to mineral patch
-                double distToMine = entity.getCenter().distance(miningTarget.getCenter());
-                //get effective range needed for mining, +5 for buffer
-                double combinedDistance = (entity.getWidth() / 2.0) + (miningTarget.getWidth() / 2.0) + 5;
-                //if close enough, mine
-                if (distToMine < combinedDistance) {
+                //arrive test against the patch's bounding box instead of its centre:
+                //the centre test only cleared the collision push-out by a few pixels
+                //depending on approach direction, so wedged workers never "arrived"
+                double distToMine = distanceToBounds(miningTarget);
+                if (distToMine <= gatherReach()) {
                     //stop moving before mining
                     moveTarget = null;
                     finalVelocity = Point2D.ZERO;
+                    flagIsStuck = false;
+                    settleTimer = 0.0;
                     if (miningTimer <= 0.0) {
                         //mine
                         performMining();
                         miningTimer = 1.0;
                         //return cargo
                         if (resourceCarried >= COLLECTION_CAPACITY) {
-                            //try to find cc to return to if there's none
-                            if (returnTarget == null) {
-                                returnTarget = scanAroundCC();
-                            }
-                            //found cc, return
-                            if (returnTarget != null) {
-                                state = UnitState.RETURN_CARGO;
-                                moveTarget = null;
-                            }
-                            //no cc found
-                            else {
-                                System.out.println("No command centre found!");
+                            if (!returnToNearestBase()) {
                                 state = UnitState.IDLE;
                             }
                         }
                     }
                 }
-                //if we're still too far from resource, keep moving
+                //still too far from the resource
                 else {
-                    calculateMovementPhysics();
+                    if (updateApproachProgress(distToMine, timePerFrame)) {
+                        //wedged before reaching the patch: give up on it, try another
+                        Entity previous = miningTarget;
+                        miningTarget = null;
+                        moveTarget = null;
+                        resetPathProgress();
+                        miningTarget = scanAroundMine(previous);
+                        if (miningTarget == null) {
+                            state = UnitState.IDLE;
+                        }
+                    }
+                    else {
+                        calculateMovementPhysics();
+                    }
                 }
-
                 break;
+            }
 
-            case RETURN_CARGO:
-                //check for return cc
+            case RETURN_CARGO: {
+                //check for return cc, and re-validate one we already hold
                 if (returnTarget == null || !returnTarget.isActive()) {
                     returnTarget = scanAroundCC();
                     //can't find cc -> idle
                     if (returnTarget == null) {
                         state = UnitState.IDLE;
-                        return;
+                        break;
                     }
                 }
                 //move towards cc
                 if (moveTarget == null) moveTarget = returnTarget.getCenter();
-                //calculate distance to cc
-                double distToCC = entity.getCenter().distance(returnTarget.getCenter());
-                //drop-off range with +5 buffer
-                double combinedDistanceCC = (entity.getWidth() / 2.0) + (returnTarget.getWidth() / 2.0) + 5;
-                //if close enough, return
-                if (distToCC < combinedDistanceCC) {
+                //drop off once adjacent to the base, using the same box test as mining
+                double distToCC = distanceToBounds(returnTarget);
+                if (distToCC <= gatherReach()) {
                     returnResources();
+                    resetPathProgress();
                     //return to mineral again
                     if (miningTarget == null || !miningTarget.isActive()) {
                         miningTarget = scanAroundMine();
@@ -357,9 +419,76 @@ public class UnitComponent extends EntityComponent {
                 }
                 //not close enough -> keep moving
                 else {
+                    if (updateApproachProgress(distToCC, timePerFrame)) {
+                        //blocked on the way to the base: stop instead of freezing
+                        //forever; the player can issue a new order
+                        returnTarget = null;
+                        moveTarget = null;
+                        resetPathProgress();
+                        state = UnitState.IDLE;
+                    }
+                    else {
+                        calculateMovementPhysics();
+                    }
+                }
+                break;
+            }
+
+            case MOVE_TO_BUILD: {
+                ConstructionComponent site = constructionSite(buildTarget);
+                if (site == null) {
+                    //site finished, was cancelled or was destroyed
+                    buildTarget = null;
+                    moveTarget = null;
+                    resetPathProgress();
+                    state = UnitState.IDLE;
+                    break;
+                }
+                if (moveTarget == null) moveTarget = buildTarget.getCenter();
+                double distToSite = distanceToBounds(buildTarget);
+                if (distToSite <= gatherReach()) {
+                    //close enough to start constructing
+                    moveTarget = null;
+                    finalVelocity = Point2D.ZERO;
+                    resetPathProgress();
+                    state = UnitState.BUILDING;
+                }
+                else if (updateApproachProgress(distToSite, timePerFrame)) {
+                    //cannot reach the site: drop the order instead of freezing
+                    buildTarget = null;
+                    moveTarget = null;
+                    resetPathProgress();
+                    state = UnitState.IDLE;
+                }
+                else {
                     calculateMovementPhysics();
                 }
                 break;
+            }
+
+            case BUILDING: {
+                ConstructionComponent site = constructionSite(buildTarget);
+                if (site == null) {
+                    //finished; the site replaces itself with the real building
+                    buildTarget = null;
+                    moveTarget = null;
+                    resetPathProgress();
+                    state = UnitState.IDLE;
+                    break;
+                }
+                //if pushed away by other workers, walk back to the site
+                if (distanceToBounds(buildTarget) > gatherReach()) {
+                    moveTarget = buildTarget.getCenter();
+                    resetPathProgress();
+                    state = UnitState.MOVE_TO_BUILD;
+                    break;
+                }
+                moveTarget = null;
+                finalVelocity = Point2D.ZERO;
+                //several workers stack their build time; completion is handled by the site
+                site.contribute(timePerFrame);
+                break;
+            }
 
         }
 
@@ -381,48 +510,64 @@ public class UnitComponent extends EntityComponent {
     }
 
     public void orderReturnCargo(Entity baseTarget) {
+        clearCurrentOrder();
         this.returnTarget = baseTarget;
-        this.moveTarget = null;
-        this.attackTarget = null;
-        this.miningTarget = null;
-        this.flagPatrol = false;
-        this.flagHold = false;
-        this.flagIsStuck = false;
         setState(UnitState.RETURN_CARGO);
     }
 
     public void orderPatrol(Point2D patrolTarget){
+        clearCurrentOrder();
         this.patrolPointA = entity.getCenter();
         this.patrolPointB = patrolTarget;
         this.currentPatrolTarget = patrolPointB;
         this.moveTarget = currentPatrolTarget;
-        this.attackTarget = null;
-        this.attackMoveDestination = null;
         this.flagPatrol = true;
-        this.flagHold = false;
-        this.flagIsStuck = false;
         setState(UnitState.PATROL);
     }
 
     public void orderHold(){
-        this.moveTarget = null;
-        this.attackTarget = null;
-        this.attackMoveDestination =  null;
-        this.flagPatrol = false;
+        clearCurrentOrder();
         this.flagHold = true;
-        this.flagIsStuck = false;
         setState(UnitState.HOLD);
     }
 
     public void moveAttack(Point2D target) {
+        clearCurrentOrder();
         this.moveTarget = target;
-        this.attackTarget = null;
         this.attackMoveDestination = target;
-        this.flagPatrol = false;
-        this.flagIsStuck = false;
-        this.flagHold = false;
-        this.settleTimer = 0.0;
         setState(UnitState.ATTACK_MOVE);
+    }
+
+    public void orderAttack(Entity target) {
+        clearCurrentOrder();
+        attack(target);
+    }
+
+    public void stop() {
+        clearCurrentOrder();
+        setState(UnitState.IDLE);
+    }
+
+    //Explicit commands replace the previous order; combat/mining cooldowns and cargo survive.
+    private void clearCurrentOrder() {
+        moveTarget = null;
+        attackTarget = null;
+        attackMoveDestination = null;
+        miningTarget = null;
+        returnTarget = null;
+        buildTarget = null;
+        flagPatrol = false;
+        flagHold = false;
+        patrolPointA = null;
+        patrolPointB = null;
+        currentPatrolTarget = null;
+        flagIsStuck = false;
+        settleTimer = 0.0;
+        lastPosition = entity.getCenter();
+        finalVelocity = Point2D.ZERO;
+        //a new order must not inherit progress bookkeeping from the previous target
+        approachBestDistance = Double.MAX_VALUE;
+        approachNoProgressTime = 0.0;
     }
 
     //helper that scans around the current unit and finds a valid hostile target
@@ -431,47 +576,63 @@ public class UnitComponent extends EntityComponent {
         //if ranged, slightly larger, if melee, set to 250
         double scanRadius = Math.max(stats.attackRange() * 1.5, 250);
 
-        var foundEntities = getGameWorld().getEntitiesInRange(
-                new Rectangle2D(entity.getCenter().getX() - scanRadius, entity.getCenter().getY() - scanRadius,
+        Point2D center = entity.getCenter();
+        var foundEntities = entity.getWorld().getEntitiesInRange(
+                new Rectangle2D(center.getX() - scanRadius, center.getY() - scanRadius,
                         scanRadius * 2, scanRadius * 2));
         return foundEntities.stream()
                 .filter(e -> e != entity)//has to be an entity
                 .filter(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE))//has to be a unit or a structure
                 .filter(e -> isHostile(e))//filter for hostile
-                .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
-                .findFirst()//first found that fits all conditions
+                .min(Comparator.comparingDouble(e -> e.distance(entity)))
                 .orElse(null);//return null if no valid target
     }
 
     //helper that scans around the current unit and finds a valid mineral patch
     public Entity scanAroundMine() {
+        return scanAroundMine(null);
+    }
 
-        var foundEntities = getGameWorld().getEntitiesInRange(
-                new Rectangle2D(entity.getCenter().getX() - MINERAL_SCAN_RANGE, entity.getCenter().getY() - MINERAL_SCAN_RANGE,
+    //nearest mineral patch, optionally ignoring one that just proved unreachable
+    private Entity scanAroundMine(Entity exclude) {
+
+        Point2D center = entity.getCenter();
+        var foundEntities = entity.getWorld().getEntitiesInRange(
+                new Rectangle2D(center.getX() - MINERAL_SCAN_RANGE, center.getY() - MINERAL_SCAN_RANGE,
                         MINERAL_SCAN_RANGE * 2, MINERAL_SCAN_RANGE * 2));
         return foundEntities.stream()
                 .filter(e -> e != entity)//has to be an entity
+                .filter(e -> e != exclude)//skip the patch we just gave up on
                 .filter(e -> e.isType(EntityType.RESOURCE))//has to be a resource
                 .filter(e -> e.hasComponent(ResourceComponent.class))//filter resource with logic
                 .filter(e -> e.getComponent(ResourceComponent.class).getResourceType() == 0)//filters for minerals
                 .filter(e -> e.getComponent(ResourceComponent.class).hpProperty().get() > 0)
-                .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
-                .findFirst()//first found that fits all conditions
+                .min(Comparator.comparingDouble(e -> e.distance(entity)))
                 .orElse(null);//return null if no valid target
     }
 
-    //finds a nearby cc
+    //finds a nearby cc owned by this unit's player
     public Entity scanAroundCC() {
-        var foundEntities = getGameWorld().getEntitiesInRange(
-                new Rectangle2D(entity.getCenter().getX() - MINERAL_SCAN_RANGE, entity.getCenter().getY() - MINERAL_SCAN_RANGE,
-                        MINERAL_SCAN_RANGE * 2, MINERAL_SCAN_RANGE * 2));
+        Point2D center = entity.getCenter();
+        var foundEntities = entity.getWorld().getEntitiesInRange(
+                new Rectangle2D(center.getX() - BASE_SCAN_RANGE, center.getY() - BASE_SCAN_RANGE,
+                        BASE_SCAN_RANGE * 2, BASE_SCAN_RANGE * 2));
         return foundEntities.stream()
                 .filter(e -> e != entity)//has to be an entity
-                .filter(e -> e.isType(EntityType.STRUCTURE))//has to be a resource
+                .filter(Entity::isActive)//ignore bases that were already destroyed
+                .filter(e -> e.isType(EntityType.STRUCTURE))//has to be a structure
                 .filter(e -> e.hasComponent(StructureComponent.class))//filter structure with logic
                 .filter(e -> e.hasComponent(BaseComponent.class))//filters for bases
-                .sorted((e1, e2) -> Double.compare(e1.distance(entity), e2.distance(entity)))//sort closer targer
-                .findFirst()//first found that fits all conditions
+                //only drop off at our own (or an ally's) base, never at an enemy's
+                .filter(e -> {
+                    StructureComponent base = e.getComponent(StructureComponent.class);
+                    if (base.getOwner() == null) return false;
+                    Relation stance = this.getOwner() != null
+                            ? this.getOwner().getStance(base.getOwner())
+                            : Relation.NEUTRAL;
+                    return stance == Relation.SELF || stance == Relation.ALLY;
+                })
+                .min(Comparator.comparingDouble(e -> e.distance(entity)))
                 .orElse(null);//return null if no valid target
     }
 
@@ -494,7 +655,64 @@ public class UnitComponent extends EntityComponent {
                 }
             }
         }
-        System.out.println("Not a real resource mined!");
+        LOGGER.log(DEBUG, "Not a real resource mined!");
+    }
+
+    //how close this unit's centre must get to a target's bounds to act on it
+    private double gatherReach() {
+        return entity.getWidth() / 2.0 + GATHER_REACH_SLACK;
+    }
+
+    //distance from this unit's centre to the nearest point of the target's bounds
+    //(0 when the centre is inside). Direction-independent, unlike a centre-to-centre
+    //test whose clearance depends on which side the unit approaches from.
+    private double distanceToBounds(Entity target) {
+        Point2D center = entity.getCenter();
+        double minX = target.getX();
+        double minY = target.getY();
+        double maxX = minX + target.getWidth();
+        double maxY = minY + target.getHeight();
+        double closestX = Math.max(minX, Math.min(center.getX(), maxX));
+        double closestY = Math.max(minY, Math.min(center.getY(), maxY));
+        return center.distance(closestX, closestY);
+    }
+
+    //forget the movement-progress bookkeeping so a fresh path starts clean
+    private void resetPathProgress() {
+        flagIsStuck = false;
+        settleTimer = 0.0;
+        lastPosition = entity.getCenter();
+        approachBestDistance = Double.MAX_VALUE;
+        approachNoProgressTime = 0.0;
+    }
+
+    //True once the unit has spent too long without getting measurably closer to
+    //its goal (ore patch, drop-off base or construction site). Raw movement
+    //cannot detect this: a unit can jitter a few pixels per frame against a wall
+    //or another unit forever.
+    private boolean updateApproachProgress(double distanceToTarget, double timePerFrame) {
+        if (distanceToTarget < approachBestDistance - 1.0) {
+            approachBestDistance = distanceToTarget;
+            approachNoProgressTime = 0.0;
+            return false;
+        }
+        approachNoProgressTime += timePerFrame;
+        return approachNoProgressTime > 0.8;
+    }
+
+    //send the worker back to the nearest own base; false when there is none
+    private boolean returnToNearestBase() {
+        if (returnTarget == null || !returnTarget.isActive()) {
+            returnTarget = scanAroundCC();
+        }
+        if (returnTarget == null) {
+            LOGGER.log(DEBUG, "No command centre found!");
+            return false;
+        }
+        moveTarget = null;
+        resetPathProgress();
+        setState(UnitState.RETURN_CARGO);
+        return true;
     }
 
     //check if we're stuck, if so, raise a flag
@@ -539,8 +757,10 @@ public class UnitComponent extends EntityComponent {
         if (attackTarget != null){
 
             EntityComponent targetStats = getEntityComponent(attackTarget);
-            //first check if target is still there
-            if (!attackTarget.isActive() || targetStats.hpProperty().get() <= 0 || targetStats == null) {
+            //check existence FIRST: getEntityComponent returns null when the
+            //target lost its component (e.g. already removed from the world),
+            //and the old order dereferenced it before the null test
+            if (targetStats == null || !attackTarget.isActive() || targetStats.hpProperty().get() <= 0) {
                 attackTarget = null;
                 moveTarget = null;
                 return;
@@ -589,12 +809,15 @@ public class UnitComponent extends EntityComponent {
             if (state == UnitState.MOVING && distance < 50) {
                 currentSpeed *= (distance / 50);
             }
-            moveDir = moveVector.normalize().multiply(currentSpeed);
+            if (distance > 0) {
+                moveDir = moveVector.multiply(currentSpeed / distance);
+            }
         }
         //add this separation to the existing velocity (regular movement)
         finalVelocity = moveDir.add(separation);
         //if it's faster than intended, clamp it to the unit's speed
-        if (finalVelocity.magnitude() > stats.moveSpeed()) finalVelocity = finalVelocity.normalize().multiply(stats.moveSpeed());
+        double speed = finalVelocity.magnitude();
+        if (speed > stats.moveSpeed()) finalVelocity = finalVelocity.multiply(stats.moveSpeed() / speed);
     }
 
     //check if hostile to this
@@ -602,7 +825,7 @@ public class UnitComponent extends EntityComponent {
 
         EntityComponent targetComponent = getEntityComponent(e);
         //check for nulls
-        if (targetComponent == null || targetComponent.getOwner() == null) return false;
+        if (getOwner() == null || targetComponent == null || targetComponent.getOwner() == null) return false;
 
         //find player using ID instead of getOwner
         Player actualOwner = PlayerManager.findPlayerFromID(this.getOwner().getPlayerID());
@@ -615,13 +838,8 @@ public class UnitComponent extends EntityComponent {
     }
 
     public void moveTo(Point2D moveTarget){
+        clearCurrentOrder();
         this.moveTarget = moveTarget;
-        this.attackTarget = null;
-        this.attackMoveDestination =  null;
-        this.flagPatrol = false;
-        this.flagIsStuck = false;
-        this.flagHold = false;
-        this.settleTimer = 0.0;
         setState(UnitState.MOVING);
     }
 
@@ -638,10 +856,13 @@ public class UnitComponent extends EntityComponent {
 
     //helper method to calculate the amount to bump each unit by when colliding
     private Point2D calculateSeparation(){
-        Point2D separationVector = Point2D.ZERO;
+        double separationX = 0.0;
+        double separationY = 0.0;
+        Point2D myCenter = entity.getCenter();
 
         double unitRadius = entity.getWidth() / 2.0;
         double searchDist = unitRadius * 4.0 + 50.0;
+        double moveSpeed = stats.moveSpeed();
 
         Rectangle2D detectionArea = new Rectangle2D(
                 entity.getX() - searchDist,
@@ -650,35 +871,38 @@ public class UnitComponent extends EntityComponent {
                 searchDist * 2
         );
 
-        var nearbyUnits = FXGL.getGameWorld().getEntitiesInRange(detectionArea);
+        var nearbyUnits = entity.getWorld().getEntitiesInRange(detectionArea);
 
         for (Entity other: nearbyUnits){
             if (other == entity) continue;
 
-            //Rectangle Structure collision
-            if (other.isType(EntityType.STRUCTURE)||other.isType(EntityType.RESOURCE)){
+            //Rectangle Structure collision (finished buildings and construction sites)
+            if (other.isType(EntityType.STRUCTURE) || other.isType(EntityType.RESOURCE)
+                    || other.isType(EntityType.CONSTRUCTION)){
                 //get the exact bounds of the structure/resource
                 double bMinX = other.getX();
                 double bMinY = other.getY();
                 double bMaxX = bMinX + other.getWidth();
                 double bMaxY = bMinY + other.getHeight();
                 //find the closest point on the building to the center of this entity
-                Point2D myCenter = entity.getCenter();
                 double closestX = Math.max(bMinX, Math.min(myCenter.getX(), bMaxX));
                 double closestY = Math.max(bMinY, Math.min(myCenter.getY(), bMaxY));
-                Point2D closestPoint = new Point2D(closestX, closestY);
-                //calculate distance to this closest point from center of this entity
-                double distToWall = myCenter.distance(closestPoint);
-                //Unit centre should be at least its own radius away from the wall
-                double overlap = unitRadius + 2.0 - distToWall;
-                //if in the building, push really hard outwards.
-                if (overlap > 0){
-                    Point2D pushDir = myCenter.subtract(closestPoint).normalize();
-                    if (pushDir.magnitude() == 0) pushDir = new Point2D(1,0);
-
-                    double maxPush = 5.0;
+                double deltaX = myCenter.getX() - closestX;
+                double deltaY = myCenter.getY() - closestY;
+                double distanceSquared = deltaX * deltaX + deltaY * deltaY;
+                double requiredSpace = unitRadius + 2.0;
+                //Reject non-overlaps before calculating a distance or allocating vectors.
+                if (distanceSquared < requiredSpace * requiredSpace){
+                    double distToWall = Math.sqrt(distanceSquared);
+                    double overlap = requiredSpace - distToWall;
                     double pushForceScale = Math.min(overlap / 10.0, 1.0);
-                    separationVector = separationVector.add(pushDir.multiply(stats.moveSpeed() * maxPush * pushForceScale));
+                    double pushSpeed = moveSpeed * 5.0 * pushForceScale;
+                    if (distToWall > 0) {
+                        separationX += deltaX / distToWall * pushSpeed;
+                        separationY += deltaY / distToWall * pushSpeed;
+                    } else {
+                        separationX += pushSpeed;
+                    }
                 }
 
             }
@@ -690,26 +914,32 @@ public class UnitComponent extends EntityComponent {
                 //space between the 2 units should be their conbined radius
                 double requiredSpace = unitRadius + otherRadius;
                 //distance from this center to the other's center
-                double dist = entity.getCenter().distance(other.getCenter());
+                Point2D otherCenter = other.getCenter();
+                double deltaX = myCenter.getX() - otherCenter.getX();
+                double deltaY = myCenter.getY() - otherCenter.getY();
+                double distanceSquared = deltaX * deltaX + deltaY * deltaY;
                 //if they're not overlapping but too close together
-                if (dist < requiredSpace && dist > 0){
-                    //calculate the vector to push away by
-                    Point2D pushAway = entity.getCenter().subtract(other.getCenter());
+                if (distanceSquared < requiredSpace * requiredSpace && distanceSquared > 0){
+                    double dist = Math.sqrt(distanceSquared);
                     //strength is stronger the deeper the overlap is
                     double strength = (requiredSpace - dist) / requiredSpace;
-                    //the vector to separate by is normalized for direction, then multipled by given strength and unit speed then added
-                    separationVector = separationVector.add(pushAway.normalize().multiply(stats.moveSpeed() * strength));
+                    separationX += deltaX / dist * moveSpeed * strength;
+                    separationY += deltaY / dist * moveSpeed * strength;
                 }
             }
 
         }
 
-        return separationVector;
+        return separationX == 0 && separationY == 0
+                ? Point2D.ZERO
+                : new Point2D(separationX, separationY);
     }
 
     //performs the attack
     private void performAttack() {
-        System.out.println(stats.name() + "attacked" + attackTarget.getType());
+        if (LOGGER.isLoggable(DEBUG)) {
+            LOGGER.log(DEBUG, "{0} attacked {1}", stats.name(), attackTarget.getType());
+        }
 
         EntityComponent targetStats = getEntityComponent(attackTarget);
 
@@ -717,12 +947,15 @@ public class UnitComponent extends EntityComponent {
             int currentHp = targetStats.hpProperty().get();
             int damage = (int) stats.attackDamage();
             int armor = targetStats.armorProperty() != null ? targetStats.armorProperty().get() : 0;
-            targetStats.hpProperty().set(Math.max(0, currentHp - (damage - armor)));
+            //armour must never turn an attack into healing: keep a floor of 1
+            int effectiveDamage = Math.max(1, damage - armor);
+            targetStats.hpProperty().set(Math.max(0, currentHp - effectiveDamage));
         }
 
     }
 
-    //assigns target for attack
+    //Auto-acquired targets temporarily interrupt patrol, hold, or attack-move.
+    //Player attack commands use orderAttack so they replace those orders.
     public void attack(Entity target){
         this.attackTarget = target;
         this.moveTarget = null;
@@ -732,11 +965,29 @@ public class UnitComponent extends EntityComponent {
     }
 
     public void mine(Entity target){
+        clearCurrentOrder();
         this.miningTarget = target;
-        this.moveTarget = null;
-        this.flagIsStuck = false;
-        this.settleTimer = 0.0;
         setState(UnitState.GATHER);
+    }
+
+    //worker walks to a construction site and adds build progress while there
+    public void orderBuild(Entity site) {
+        clearCurrentOrder();
+        this.buildTarget = site;
+        setState(UnitState.MOVE_TO_BUILD);
+    }
+
+    public Entity getBuildTarget() {
+        return buildTarget;
+    }
+
+    //the construction site this worker is assigned to, if it still needs building
+    private ConstructionComponent constructionSite(Entity target) {
+        if (target == null || !target.isActive()) {
+            return null;
+        }
+        ConstructionComponent site = target.getComponentOptional(ConstructionComponent.class).orElse(null);
+        return site != null && !site.isComplete() ? site : null;
     }
 
     //helper to
@@ -759,7 +1010,9 @@ public class UnitComponent extends EntityComponent {
     }
 
     public void setState(UnitState state) {
-        System.out.println(name.get() + " changed state to: " + state);
+        if (this.state != state && LOGGER.isLoggable(DEBUG)) {
+            LOGGER.log(DEBUG, "{0} changed state to: {1}", name.get(), state);
+        }
         this.state = state;
     }
 }
