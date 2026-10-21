@@ -133,7 +133,10 @@ public class UnitComponent extends EntityComponent {
                 break;
 
             case ATTACK:
-                if (attackTarget == null || !attackTarget.isActive()){
+                if (attackTarget == null || !attackTarget.isActive()
+                        || !FogOfWar.isVisibleTo(attackTarget, getOwner())){
+                    attackTarget = null;
+                    moveTarget = null;
                     state = UnitState.IDLE;
                     //patrol logic.
                     if (flagPatrol){
@@ -539,6 +542,7 @@ public class UnitComponent extends EntityComponent {
     }
 
     public void orderAttack(Entity target) {
+        if (!FogOfWar.isVisibleTo(target, getOwner())) return;
         clearCurrentOrder();
         attack(target);
     }
@@ -584,6 +588,7 @@ public class UnitComponent extends EntityComponent {
                 .filter(e -> e != entity)//has to be an entity
                 .filter(e -> e.isType(EntityType.UNIT) || e.isType(EntityType.STRUCTURE))//has to be a unit or a structure
                 .filter(e -> isHostile(e))//filter for hostile
+                .filter(e -> FogOfWar.isVisibleTo(e, getOwner()))
                 .min(Comparator.comparingDouble(e -> e.distance(entity)))
                 .orElse(null);//return null if no valid target
     }
@@ -607,6 +612,7 @@ public class UnitComponent extends EntityComponent {
                 .filter(e -> e.hasComponent(ResourceComponent.class))//filter resource with logic
                 .filter(e -> e.getComponent(ResourceComponent.class).getResourceType() == 0)//filters for minerals
                 .filter(e -> e.getComponent(ResourceComponent.class).hpProperty().get() > 0)
+                .filter(e -> FogOfWar.isVisibleTo(e, getOwner()))
                 .min(Comparator.comparingDouble(e -> e.distance(entity)))
                 .orElse(null);//return null if no valid target
     }

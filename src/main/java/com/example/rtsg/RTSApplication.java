@@ -48,6 +48,7 @@ public class RTSApplication extends GameApplication {
     private List<Entity> selectedUnits = new ArrayList<>();
     private Rectangle selectionBox = new Rectangle(0, 0, Color.rgb(0, 255, 0, 0.3));
     private Point2D selectionStartPoint;
+    private Point2D panPointer;
 
     private enum InputMode { SELECT, MOVE, ATTACK, PATROL, PLACEMENT }
     private InputMode inputMode = InputMode.SELECT;
@@ -70,6 +71,7 @@ public class RTSApplication extends GameApplication {
     private HBox bottomUIBar;
     private GridPane controlPanel;
     private HBox miniMapPanel;
+    private MiniMapView miniMap;
     private VBox infoPanel;
     private HBox topUIBar;
     private Label mineralLabel;
@@ -107,6 +109,8 @@ public class RTSApplication extends GameApplication {
     private Player botPlayer1;
 
     private Player resourcePlayer;
+    private FogOfWar fogOfWar;
+    private FogOfWarView fogView;
 
     @Override
     protected void initSettings(GameSettings gameSettings) {
@@ -183,6 +187,11 @@ public class RTSApplication extends GameApplication {
         spawnBuildingAtTiles("command_centre", 73, 6, botPlayer1);
         spawnBuildingAtTiles("command_centre", 16, 73, botPlayer1);
         spawnBuildingAtTiles("command_centre", 73, 73, botPlayer1);
+
+        fogOfWar = new FogOfWar(getGameWorld(), PlayerManager.getHumanPlayer(), MAP_WIDTH, MAP_HEIGHT);
+        fogView = new FogOfWarView(fogOfWar.getViewerGrid());
+        // Cover the world while leaving placement previews, rally orders, and the HUD readable.
+        entityBuilder().at(0, 0).view(fogView).zIndex(90).buildAndAttach();
     }
 
     @Override
@@ -219,8 +228,15 @@ public class RTSApplication extends GameApplication {
 
         miniMapPanel = new HBox();
         miniMapPanel.setPrefSize(300,300);
+        miniMapPanel.setMinSize(300, 300);
+        miniMapPanel.setMaxSize(300, 300);
+        miniMapPanel.setAlignment(Pos.CENTER);
+        miniMapPanel.setPadding(new Insets(10));
         miniMapPanel.setBorder(new Border(new BorderStroke(Color.GOLD, BorderStrokeStyle.SOLID, CornerRadii.EMPTY, BorderWidths.DEFAULT)));
         miniMapPanel.setBackground(new Background(new BackgroundFill(Color.rgb(0,0,0,0.7), CornerRadii.EMPTY, Insets.EMPTY)));
+        miniMap = new MiniMapView(getGameWorld(), PlayerManager.getHumanPlayer(), fogOfWar,
+                getGameScene().getViewport(), 278);
+        miniMapPanel.getChildren().add(miniMap);
 
         nameLabel = new Label("");
         nameLabel.setTextFill(Color.WHITE);
@@ -277,6 +293,33 @@ public class RTSApplication extends GameApplication {
 
         Viewport view = getGameScene().getViewport();
 
+        input.addAction(new UserAction("Pan Camera") {
+            @Override
+            protected void onActionBegin() {
+                Point2D pointer = input.getMousePositionUI();
+                if (!isPointerOverUI(pointer) && !selectionBox.isVisible()) {
+                    panPointer = pointer;
+                }
+            }
+
+            @Override
+            protected void onAction() {
+                if (panPointer == null) return;
+                Point2D pointer = input.getMousePositionUI();
+                Point2D delta = pointer.subtract(panPointer).multiply(1.0 / view.getZoom());
+                double maxX = Math.max(0, MAP_WIDTH - view.getWidth() / view.getZoom());
+                double maxY = Math.max(0, MAP_HEIGHT - view.getHeight() / view.getZoom());
+                view.setX(Math.clamp(view.getX() - delta.getX(), 0, maxX));
+                view.setY(Math.clamp(view.getY() - delta.getY(), 0, maxY));
+                panPointer = pointer;
+            }
+
+            @Override
+            protected void onActionEnd() {
+                panPointer = null;
+            }
+        }, MouseButton.MIDDLE);
+
         getInput().addAction(new UserAction("Move Camera Up") {
             @Override
             protected void onAction() {
@@ -322,6 +365,7 @@ public class RTSApplication extends GameApplication {
             @Override
             protected void onActionBegin() {
                 Point2D mousePosUI = input.getMousePositionUI();
+                if (panPointer != null) return;
                 selectionBox.setVisible(false);
                 if (isPointerOverUI(mousePosUI)) {
                     return;
@@ -380,6 +424,7 @@ public class RTSApplication extends GameApplication {
         input.addAction(selectionAction, MouseButton.PRIMARY);
 
         onBtnDown(MouseButton.SECONDARY, () -> {
+            if (panPointer != null) return;
             if (isPointerOverUI(input.getMousePositionUI())) {
                 return;
             }
@@ -404,6 +449,11 @@ public class RTSApplication extends GameApplication {
 
     @Override
     protected void onUpdate(double timePerFrame) {
+        if (fogOfWar != null && fogOfWar.update(timePerFrame)) {
+            fogView.redraw();
+            if (miniMap != null) miniMap.redraw();
+        }
+        if (miniMap != null) miniMap.updateCamera();
         if (selectedUnits.stream().anyMatch(entity -> !isSelectable(entity))) {
             applySelection(selectedUnits.stream().filter(this::isSelectable).toList());
         }
@@ -417,7 +467,9 @@ public class RTSApplication extends GameApplication {
         updateRallyPointOverlay();
 
         Cursor newCursor = javafx.scene.Cursor.DEFAULT;
-        if (!isPointerOverUI(getInput().getMousePositionUI())) {
+        if (panPointer != null) {
+            newCursor = Cursor.CLOSED_HAND;
+        } else if (!isPointerOverUI(getInput().getMousePositionUI())) {
             if (inputMode != InputMode.SELECT) {
                 newCursor = Cursor.CROSSHAIR;
             } else {
@@ -433,6 +485,8 @@ public class RTSApplication extends GameApplication {
             currCursor = newCursor;
         }
 
+
+        if (panPointer != null || isPointerOverUI(getInput().getMousePositionUI())) return;
 
         //detection if mouse is at edges of screen
         double mousePosX = getInput().getMousePositionUI().getX();
@@ -472,7 +526,7 @@ public class RTSApplication extends GameApplication {
     }
 
     private boolean isSelectable(Entity entity) {
-        if (!entity.isActive()) {
+        if (!entity.isActive() || !FogOfWar.isVisibleTo(entity, PlayerManager.getHumanPlayer())) {
             return false;
         }
         //construction sites carry no EntityComponent but are selectable so the
@@ -584,7 +638,7 @@ public class RTSApplication extends GameApplication {
         Entity building = null;
         Point2D rally = null;
         for (Entity selected : selectedUnits) {
-            if (!selected.isActive()) {
+            if (!canCommandStructure(selected)) {
                 continue;
             }
             ProductionComponent production = selected.getComponentOptional(ProductionComponent.class).orElse(null);
@@ -677,6 +731,15 @@ public class RTSApplication extends GameApplication {
         int tileY = BuildGrid.centeredTileIndex(mouse.getY(), pendingBuilding.tilesHigh());
         Rectangle2D footprint = BuildingPlacement.footprintFor(pendingBuilding, tileX, tileY);
         Player human = PlayerManager.getHumanPlayer();
+        if (!BuildGrid.fitsInside(footprint, MAP_WIDTH, MAP_HEIGHT)) {
+            return new PlacementPreview(pendingBuilding, tileX, tileY, footprint,
+                    BuildingPlacement.Result.OUT_OF_BOUNDS);
+        }
+        // Check sight before occupancy, so preview colours cannot reveal hidden obstacles.
+        if (fogOfWar != null && !fogOfWar.isAreaVisible(human, footprint)) {
+            return new PlacementPreview(pendingBuilding, tileX, tileY, footprint,
+                    BuildingPlacement.Result.NOT_VISIBLE);
+        }
         BuildingPlacement.Result result = BuildingPlacement.evaluate(
                 pendingBuilding, tileX, tileY, MAP_WIDTH, MAP_HEIGHT,
                 collectOccupiedFootprints(), human == null ? 0 : human.getMinerals());
@@ -752,9 +815,7 @@ public class RTSApplication extends GameApplication {
         var targetList = getGameWorld().getEntitiesInRange(new Rectangle2D(mousePos.getX() - 10, mousePos.getY() - 10, 20, 20));
 
         Entity targetEntity = targetList.stream()
-                //construction sites are right-click targets (resume building) but
-                //are not selectable, so they are admitted explicitly here
-                .filter(e -> isSelectable(e) || e.isType(EntityType.CONSTRUCTION))
+                .filter(this::isSelectable)
                 // Prefer units and structures when a resource overlaps them.
                 .filter(e -> !e.isType(EntityType.RESOURCE))
                 .filter(e -> !selectedUnits.contains(e))

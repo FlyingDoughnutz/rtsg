@@ -11,7 +11,6 @@ public class UnitDatabase {
     static {
         statsMap.put("marine", new UnitStats("Marine", 70, 125, 150, 7, 0.5, 1, false, 1, 50, 25));
         statsMap.put("scv", new UnitStats("SCV", 60, 125, 15, 5, 1, 0, true, 1, 50, 12));
-        //was a copy of the SCV row: name "SCV", worker flag on, ranged attack
         statsMap.put("zergling", new UnitStats("Zergling", 60, 125, 5, 5, 1, 0, false, 1, 50, 8));
     }
 

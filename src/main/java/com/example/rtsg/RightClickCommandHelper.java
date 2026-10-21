@@ -21,7 +21,8 @@ public class RightClickCommandHelper {
     }
 
     public static void executeSmartCommand(List<Entity> selectedUnits, Entity target, Point2D mousePos) {
-        if (target != null && !target.isActive()) {
+        if (target != null && (!target.isActive()
+                || !FogOfWar.isVisibleTo(target, PlayerManager.getHumanPlayer()))) {
             target = null;
         }
         for  (Entity unit : selectedUnits) {
