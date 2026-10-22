@@ -84,7 +84,7 @@
                         <id>default-cli</id>
                         <configuration>
                             <!-- there is no HelloApplication in this project; Launcher is the entry point -->
-                            <mainClass>com.example.rtsg/com.example.rtsg.Launcher</mainClass>
+                            <mainClass>com.example.rtsg/com.example.rtsg.app.Launcher</mainClass>
                             <launcher>app</launcher>
                             <jlinkZipName>app</jlinkZipName>
                             <jlinkImageName>app</jlinkImageName>
